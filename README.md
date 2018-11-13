@@ -202,6 +202,7 @@ Currently supported backends are:
 * stdout
 * cloudwatch
 * newrelic
+* zenoss
 
 The format of each metric is:
 
