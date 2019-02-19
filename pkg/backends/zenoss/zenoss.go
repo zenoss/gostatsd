@@ -11,10 +11,17 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
-	proto "github.com/zenoss/zing-proto/go/cloud/data_receiver"
+
+	"github.com/golang/protobuf/ptypes"
+	"github.com/golang/protobuf/ptypes/any"
+	"github.com/golang/protobuf/ptypes/wrappers"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
+
+	proto "github.com/zenoss/zing-proto/go/cloud/data_receiver"
+	"github.com/zenoss/zing-proto/go/model"
 )
 
 const (
@@ -31,17 +38,19 @@ const (
 	paramDisabledSubMetrics = "disabled-sub-metrics"
 
 	// zenoss parameters.
-	paramAddress         = "address"
-	paramDisableTLS      = "disable-tls"
-	paramInsecureTLS     = "insecure-tls"
-	paramAPIKey          = "api-key"
-	paramMetricsPerBatch = "metrics-per-batch"
-	paramModelInterval   = "model-interval"
-	paramModelTags       = "model-tags"
-	paramTweaks          = "tweaks"
+	paramAddress             = "address"
+	paramDisableTLS          = "disable-tls"
+	paramInsecureTLS         = "insecure-tls"
+	paramAPIKey              = "api-key"
+	paramMetricsPerBatch     = "metrics-per-batch"
+	paramMetricMetadataTags  = "metric-metadata-tags"
+	paramMetricDimensionTags = "metric-dimension-tags"
+	paramModelDimensionTags  = "model-dimension-tags"
+	paramTweaks              = "tweaks"
 
 	// zenoss tweaks for non-standard and testing behavior.
 	tweakNoModels          = "no-models"
+	tweakTaggedMetrics     = "tagged-metrics"
 	tweakUsePublishMetrics = "use-PublishMetrics"
 	tweakUsePutMetric      = "use-PutMetric"
 )
@@ -56,11 +65,12 @@ type Client struct {
 	client proto.DataReceiverServiceClient
 
 	// zenoss options
-	apiKey          string
-	metricsPerBatch int
-	modelInterval   time.Duration
-	modelTags       *Set
-	tweaks          *Set
+	apiKey              string
+	metricsPerBatch     int
+	metricMetadataTags  *Set
+	metricDimensionTags *Set
+	modelDimensionTags  *Set
+	tweaks              *Set
 
 	// gostatsd options
 	disabledSubtypes gostatsd.TimerSubtypes
@@ -77,8 +87,9 @@ func NewClientFromViper(v *viper.Viper) (gostatsd.Backend, error) {
 	z.SetDefault(paramDisableTLS, defaultDisableTLS)
 	z.SetDefault(paramInsecureTLS, defaultInsecureTLS)
 	z.SetDefault(paramMetricsPerBatch, defaultMetricsPerBatch)
-	z.SetDefault(paramModelInterval, defaultModelInterval)
-	z.SetDefault(paramModelTags, []string{})
+	z.SetDefault(paramMetricDimensionTags, []string{})
+	z.SetDefault(paramMetricMetadataTags, []string{})
+	z.SetDefault(paramModelDimensionTags, []string{})
 	z.SetDefault(paramTweaks, []string{})
 
 	return NewClient(
@@ -87,8 +98,9 @@ func NewClientFromViper(v *viper.Viper) (gostatsd.Backend, error) {
 		z.GetBool(paramDisableTLS),
 		z.GetBool(paramInsecureTLS),
 		z.GetInt(paramMetricsPerBatch),
-		z.GetDuration(paramModelInterval),
-		z.GetStringSlice(paramModelTags),
+		z.GetStringSlice(paramMetricDimensionTags),
+		z.GetStringSlice(paramMetricMetadataTags),
+		z.GetStringSlice(paramModelDimensionTags),
 		z.GetStringSlice(paramTweaks),
 		gostatsd.DisabledSubMetrics(v),
 	)
@@ -101,20 +113,22 @@ func NewClient(
 	disableTLS bool,
 	insecureTLS bool,
 	metricsPerBatch int,
-	modelInterval time.Duration,
-	modelTags []string,
+	metricDimensionTags []string,
+	metricMetadataTags []string,
+	modelDimensionTags []string,
 	tweaks []string,
 	disabledSubtypes gostatsd.TimerSubtypes) (*Client, error) {
 
 	zlogWithFields(log.Fields{
-		paramAddress:            address,
-		paramDisableTLS:         disableTLS,
-		paramInsecureTLS:        insecureTLS,
-		paramMetricsPerBatch:    metricsPerBatch,
-		paramModelInterval:      modelInterval,
-		paramModelTags:          modelTags,
-		paramTweaks:             tweaks,
-		paramDisabledSubMetrics: disabledSubtypes,
+		paramAddress:             address,
+		paramDisableTLS:          disableTLS,
+		paramInsecureTLS:         insecureTLS,
+		paramMetricsPerBatch:     metricsPerBatch,
+		paramMetricDimensionTags: metricDimensionTags,
+		paramMetricMetadataTags:  metricMetadataTags,
+		paramModelDimensionTags:  modelDimensionTags,
+		paramTweaks:              tweaks,
+		paramDisabledSubMetrics:  disabledSubtypes,
 	}).Info("creating client")
 
 	if metricsPerBatch <= 0 {
@@ -136,6 +150,20 @@ func NewClient(
 			tweakUsePutMetric)
 	}
 
+	// The default PutMetrics service only supports canonical metrics.
+	apiSupportsTags :=
+		tweakSet.Has(tweakUsePublishMetrics) ||
+			tweakSet.Has(tweakUsePutMetric)
+
+	if tweakSet.Has(tweakTaggedMetrics) && !apiSupportsTags {
+		return nil, fmt.Errorf(
+			"[%s] %s requires that either %s or %s be set",
+			BackendName,
+			tweakTaggedMetrics,
+			tweakUsePublishMetrics,
+			tweakUsePublishMetrics)
+	}
+
 	var opt grpc.DialOption
 	if disableTLS {
 		opt = grpc.WithInsecure()
@@ -150,13 +178,14 @@ func NewClient(
 	}
 
 	return &Client{
-		client:           proto.NewDataReceiverServiceClient(conn),
-		apiKey:           apiKey,
-		metricsPerBatch:  metricsPerBatch,
-		modelInterval:    modelInterval,
-		modelTags:        NewSetFromStrings(modelTags),
-		tweaks:           tweakSet,
-		disabledSubtypes: disabledSubtypes,
+		client:              proto.NewDataReceiverServiceClient(conn),
+		apiKey:              apiKey,
+		metricsPerBatch:     metricsPerBatch,
+		metricDimensionTags: NewSetFromStrings(metricDimensionTags),
+		metricMetadataTags:  NewSetFromStrings(metricMetadataTags),
+		modelDimensionTags:  NewSetFromStrings(modelDimensionTags),
+		tweaks:              tweakSet,
+		disabledSubtypes:    disabledSubtypes,
 	}, nil
 }
 
@@ -210,74 +239,80 @@ func (c *Client) SendMetricsAsync(ctx context.Context, metrics *gostatsd.MetricM
 
 func (c *Client) processMetrics(timestamp int64, metrics *gostatsd.MetricMap, modeler *Modeler) []*proto.Metric {
 	zmetrics := []*proto.Metric{}
-	var metricTags Tags
-	var modelTags Tags
+	var tagTypes *TagTypes
 
 	metrics.Gauges.Each(func(key, tagsKey string, gauge gostatsd.Gauge) {
-		metricTags, modelTags := c.getTags(gauge.Tags)
-		modeler.AddDimensions(timestamp, modelTags)
-		zmetrics = c.appendMetric(zmetrics, float64(gauge.Value), timestamp, metricTags, key)
+		tagTypes = c.getTags(gauge.Tags)
+		zmetrics = c.appendMetric(zmetrics, float64(gauge.Value), timestamp, tagTypes, key)
+		modeler.AddDimensions(timestamp, tagTypes.ModelDimensionTags)
 	})
 
 	metrics.Counters.Each(func(key, tagsKey string, counter gostatsd.Counter) {
-		metricTags, modelTags = c.getTags(counter.Tags)
-		modeler.AddDimensions(timestamp, modelTags)
-		zmetrics = c.appendMetricf(zmetrics, float64(counter.PerSecond), timestamp, metricTags, "%s.rate", key)
-		zmetrics = c.appendMetricf(zmetrics, float64(counter.Value), timestamp, metricTags, "%s.count", key)
+		tagTypes = c.getTags(counter.Tags)
+		zmetrics = c.appendMetricf(zmetrics, float64(counter.PerSecond), timestamp, tagTypes, "%s.rate", key)
+		zmetrics = c.appendMetricf(zmetrics, float64(counter.Value), timestamp, tagTypes, "%s.count", key)
+		modeler.AddDimensions(timestamp, tagTypes.ModelDimensionTags)
 	})
 
 	metrics.Timers.Each(func(key, tagsKey string, timer gostatsd.Timer) {
-		metricTags, modelTags = c.getTags(timer.Tags)
-		modeler.AddDimensions(timestamp, modelTags)
+		tagTypes = c.getTags(timer.Tags)
+		modeler.AddDimensions(timestamp, tagTypes.ModelDimensionTags)
 
 		if !c.disabledSubtypes.Lower {
-			zmetrics = c.appendMetricf(zmetrics, timer.Min, timestamp, metricTags, "%s.lower", key)
+			zmetrics = c.appendMetricf(zmetrics, timer.Min, timestamp, tagTypes, "%s.lower", key)
 		}
 		if !c.disabledSubtypes.Upper {
-			zmetrics = c.appendMetricf(zmetrics, timer.Max, timestamp, metricTags, "%s.upper", key)
+			zmetrics = c.appendMetricf(zmetrics, timer.Max, timestamp, tagTypes, "%s.upper", key)
 		}
 		if !c.disabledSubtypes.Count {
-			zmetrics = c.appendMetricf(zmetrics, float64(timer.Count), timestamp, metricTags, "%s.count", key)
+			zmetrics = c.appendMetricf(zmetrics, float64(timer.Count), timestamp, tagTypes, "%s.count", key)
 		}
 		if !c.disabledSubtypes.CountPerSecond {
-			zmetrics = c.appendMetricf(zmetrics, timer.PerSecond, timestamp, metricTags, "%s.count_ps", key)
+			zmetrics = c.appendMetricf(zmetrics, timer.PerSecond, timestamp, tagTypes, "%s.count_ps", key)
 		}
 		if !c.disabledSubtypes.Mean {
-			zmetrics = c.appendMetricf(zmetrics, timer.Mean, timestamp, metricTags, "%s.mean", key)
+			zmetrics = c.appendMetricf(zmetrics, timer.Mean, timestamp, tagTypes, "%s.mean", key)
 		}
 		if !c.disabledSubtypes.Median {
-			zmetrics = c.appendMetricf(zmetrics, timer.Median, timestamp, metricTags, "%s.median", key)
+			zmetrics = c.appendMetricf(zmetrics, timer.Median, timestamp, tagTypes, "%s.median", key)
 		}
 		if !c.disabledSubtypes.StdDev {
-			zmetrics = c.appendMetricf(zmetrics, timer.StdDev, timestamp, metricTags, "%s.std", key)
+			zmetrics = c.appendMetricf(zmetrics, timer.StdDev, timestamp, tagTypes, "%s.std", key)
 		}
 		if !c.disabledSubtypes.Sum {
-			zmetrics = c.appendMetricf(zmetrics, timer.Sum, timestamp, metricTags, "%s.sum", key)
+			zmetrics = c.appendMetricf(zmetrics, timer.Sum, timestamp, tagTypes, "%s.sum", key)
 		}
 		if !c.disabledSubtypes.SumSquares {
-			zmetrics = c.appendMetricf(zmetrics, timer.SumSquares, timestamp, metricTags, "%s.sum_squares", key)
+			zmetrics = c.appendMetricf(zmetrics, timer.SumSquares, timestamp, tagTypes, "%s.sum_squares", key)
 		}
 
 		for _, pct := range timer.Percentiles {
-			zmetrics = c.appendMetricf(zmetrics, pct.Float, timestamp, metricTags, "%s.%s", key, pct.Str)
+			zmetrics = c.appendMetricf(zmetrics, pct.Float, timestamp, tagTypes, "%s.%s", key, pct.Str)
 		}
 	})
 
 	metrics.Sets.Each(func(key, tagsKey string, set gostatsd.Set) {
-		metricTags, modelTags = c.getTags(set.Tags)
-		modeler.AddDimensions(timestamp, modelTags)
-		zmetrics = c.appendMetric(zmetrics, float64(len(set.Values)), timestamp, metricTags, key)
+		tagTypes = c.getTags(set.Tags)
+		zmetrics = c.appendMetric(zmetrics, float64(len(set.Values)), timestamp, tagTypes, key)
+		modeler.AddDimensions(timestamp, tagTypes.ModelDimensionTags)
 	})
 
 	return zmetrics
 }
 
-// Tags TODO
-type Tags map[string]string
+// TagTypes TODO
+type TagTypes struct {
+	MetricDimensionTags map[string]string
+	MetricMetadataTags  map[string]*model.AnyArray
+	ModelDimensionTags  map[string]string
+}
 
-func (c *Client) getTags(tags gostatsd.Tags) (metricTags Tags, modelTags Tags) {
-	metricTags = Tags{}
-	modelTags = Tags{}
+func (c *Client) getTags(tags gostatsd.Tags) *TagTypes {
+	tagTypes := &TagTypes{
+		MetricDimensionTags: map[string]string{},
+		MetricMetadataTags:  map[string]*model.AnyArray{},
+		ModelDimensionTags:  map[string]string{},
+	}
 
 	tagKey := ""
 	tagValue := ""
@@ -292,29 +327,50 @@ func (c *Client) getTags(tags gostatsd.Tags) (metricTags Tags, modelTags Tags) {
 			tagValue = "true"
 		}
 
-		// Always add to metric tags.
-		metricTags[tagKey] = tagValue
+		if c.metricDimensionTags.Has(tagKey) {
+			tagTypes.MetricDimensionTags[tagKey] = tagValue
+		}
 
-		// Optionally add to model tags.
-		if c.modelTags.Has(tagKey) {
-			modelTags[tagKey] = tagValue
+		if c.metricMetadataTags.Has(tagKey) {
+			tagTypes.MetricMetadataTags[tagKey] = toAnyArray(tagValue)
+
+			// When the tagged-metrics tweak is used, we want to send all
+			// metric-metadata-tags and metric-dimension-tags as tags. So
+			// we'll stash them all in tagTypes.MetricDimensionTags.
+			if c.tweaks.Has(tweakTaggedMetrics) {
+				tagTypes.MetricDimensionTags[tagKey] = tagValue
+			}
+		}
+
+		if c.modelDimensionTags.Has(tagKey) {
+			tagTypes.ModelDimensionTags[tagKey] = tagValue
 		}
 	}
 
-	return metricTags, modelTags
+	return tagTypes
 }
 
-func (c *Client) appendMetricf(metrics []*proto.Metric, value float64, timestamp int64, tags map[string]string, nameFormat string, a ...interface{}) []*proto.Metric {
-	return c.appendMetric(metrics, value, timestamp, tags, fmt.Sprintf(nameFormat, a...))
+func toAnyArray(s string) *model.AnyArray {
+	av, err := ptypes.MarshalAny(&wrappers.StringValue{Value: s})
+	if err != nil {
+		return &model.AnyArray{}
+	}
+
+	return &model.AnyArray{Value: []*any.Any{av}}
 }
 
-func (c *Client) appendMetric(metrics []*proto.Metric, value float64, timestamp int64, tags map[string]string, name string) []*proto.Metric {
+func (c *Client) appendMetricf(metrics []*proto.Metric, value float64, timestamp int64, tagTypes *TagTypes, nameFormat string, a ...interface{}) []*proto.Metric {
+	return c.appendMetric(metrics, value, timestamp, tagTypes, fmt.Sprintf(nameFormat, a...))
+}
+
+func (c *Client) appendMetric(metrics []*proto.Metric, value float64, timestamp int64, tagTypes *TagTypes, name string) []*proto.Metric {
 	return append(
 		metrics,
 		&proto.Metric{
 			Metric:     name,
 			Timestamp:  timestamp,
-			Dimensions: tags,
+			Dimensions: tagTypes.MetricDimensionTags,
+			Metadata:   tagTypes.MetricMetadataTags,
 			Value:      value,
 		},
 	)
@@ -366,6 +422,8 @@ func (c *Client) getPublishMetricsBatches(inMetrics []*proto.Metric) []*proto.Me
 	batchSize := c.metricsPerBatch
 	batches := make([]*proto.MetricBatch, 0, int(len(inMetrics)%batchSize)+1)
 
+	var metricWrapper *proto.MetricWrapper
+
 	for len(inMetrics) > 0 {
 		if len(inMetrics) < batchSize {
 			batchSize = len(inMetrics)
@@ -373,14 +431,26 @@ func (c *Client) getPublishMetricsBatches(inMetrics []*proto.Metric) []*proto.Me
 
 		metricWrappers := make([]*proto.MetricWrapper, 0, batchSize)
 		for _, inMetric := range inMetrics[:batchSize] {
-			metricWrappers = append(
-				metricWrappers,
-				&proto.MetricWrapper{
+			if c.tweaks.Has(tweakTaggedMetrics) {
+				metricWrapper = &proto.MetricWrapper{
+					MetricType: &proto.MetricWrapper_Tagged{
+						Tagged: &proto.TaggedMetric{
+							Metric:    inMetric.Metric,
+							Timestamp: inMetric.Timestamp,
+							Value:     inMetric.Value,
+							Tags:      inMetric.Dimensions,
+						},
+					},
+				}
+			} else {
+				metricWrapper = &proto.MetricWrapper{
 					MetricType: &proto.MetricWrapper_Canonical{
 						Canonical: inMetric,
 					},
-				},
-			)
+				}
+			}
+
+			metricWrappers = append(metricWrappers, metricWrapper)
 		}
 
 		batches = append(
@@ -451,15 +521,29 @@ func (c *Client) putMetricStream(ctx context.Context, timestamp int64, metrics [
 		return errs
 	}
 
+	var metricWrapper *proto.MetricWrapper
+
 	for _, metric := range metrics {
-		err := stream.Send(
-			&proto.MetricWrapper{
+		if c.tweaks.Has(tweakTaggedMetrics) {
+			metricWrapper = &proto.MetricWrapper{
+				MetricType: &proto.MetricWrapper_Tagged{
+					Tagged: &proto.TaggedMetric{
+						Metric:    metric.Metric,
+						Timestamp: metric.Timestamp,
+						Value:     metric.Value,
+						Tags:      metric.Dimensions,
+					},
+				},
+			}
+		} else {
+			metricWrapper = &proto.MetricWrapper{
 				MetricType: &proto.MetricWrapper_Canonical{
 					Canonical: metric,
 				},
-			},
-		)
+			}
+		}
 
+		err := stream.Send(metricWrapper)
 		if err != nil {
 			zlogRPCWithError(rpc, err).Error("failed stream send")
 			errs = append(errs, err)
