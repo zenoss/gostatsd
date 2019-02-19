@@ -1,5 +1,5 @@
-hash: ad0605257b868207e365470c410cfec845c87bf599ab99b242a5bed14b5198fd
-updated: 2018-12-23T02:28:38.821061348+11:00
+hash: d8a79cf0e6e09eb6b27374decc671f4925fd0a6cdb2c6b08b9148b9a6a4b1fd6
+updated: 2019-02-19T21:04:55.608720916Z
 imports:
 - name: github.com/ash2k/stager
   version: 6e9c7b0eacd465286fac042bfb29a170aa8c2c3f
@@ -35,108 +35,113 @@ imports:
   - service/ec2
   - service/sts
 - name: github.com/cenkalti/backoff
-  version: f756bc9a37f808627c8c1b26d2d6ea40c468440b
+  version: 1e4cf3da559842a91afcb6ea6141451e6c30c618
+- name: github.com/davecgh/go-spew
+  version: d8f796af33cc11cb798c1aaeb27a4ebc5099927d
+  subpackages:
+  - spew
 - name: github.com/fsnotify/fsnotify
-  version: 4da3e2cfbabc9f751898f250b49f2439785783a1
+  version: ccc981bf80385c528a65fbfdd49bf2d8da22aa23
 - name: github.com/go-ini/ini
-  version: cec2bdc49009247305a260b082a18e802d0fe292
+  version: ece0e89bb05aec0d6768f7bc1e77f11f03da0d11
 - name: github.com/go-redis/redis
-  version: b3d9bf10f6666b2ee5100a6f3f84f4caf3b4e37d
+  version: 22be8a3eaf992c828cecb69dc07348313bf08d2e
   subpackages:
   - internal
   - internal/consistenthash
   - internal/hashtag
   - internal/pool
   - internal/proto
-  - internal/singleflight
   - internal/util
 - name: github.com/golang/protobuf
   version: aa810b61a9c79d51363740d207bb46cf8e620ed5
   subpackages:
   - proto
-- name: github.com/gorilla/context
-  version: 51ce91d2eaddeca0ef29a71d766bb3634dadf729
+  - ptypes
+  - ptypes/any
+  - ptypes/duration
+  - ptypes/struct
+  - ptypes/timestamp
+  - ptypes/wrappers
 - name: github.com/gorilla/mux
-  version: e3702bed27f0d39777b0b37b664b6280e8ef8fbf
-- name: github.com/gxed/eventfd
-  version: 80a92cca79a8041496ccc9dd773fcb52a57ec6f9
-- name: github.com/gxed/GoEndian
-  version: 0f5c6873267e5abf306ffcdfcfa4bf77517ef4a7
+  version: 8559a4f775fc329165fe32bd4c2543de8ada8fce
 - name: github.com/hashicorp/hcl
-  version: 392dba7d905ed5d04a5794ba89f558b27e2ba1ca
+  version: 65a6292f0157eff210d03ed1bf6c59b190b8b906
   subpackages:
   - hcl/ast
   - hcl/parser
+  - hcl/printer
   - hcl/scanner
   - hcl/strconv
   - hcl/token
   - json/parser
   - json/scanner
   - json/token
-- name: github.com/ipfs/go-log
-  version: 48d644b006ba26f1793bffc46396e981801078e3
 - name: github.com/jmespath/go-jmespath
-  version: bd40a432e4c76585ef6b72d3fd96fb9b6dc7b68d
+  version: c2b33e8439af944379acbdd9c3a5fe0bc44bd8a5
 - name: github.com/json-iterator/go
   version: 1624edc4454b8682399def8740d46db5e4362ba4
 - name: github.com/konsorten/go-windows-terminal-sequences
   version: 5c8c8bd35d3832f5d134ae1e1e375b69a4d25242
 - name: github.com/libp2p/go-reuseport
-  version: c2c3368efe65c8b85ddff6b278df5bef3ce235e2
-  subpackages:
-  - poll
-  - singlepoll
-- name: github.com/libp2p/go-sockaddr
-  version: 3c898fbfff40e5933d76362819727708dae6da97
-  subpackages:
-  - net
+  version: 6a75ffd916e5e70a5231da13d63ee5bba1109742
 - name: github.com/magiconair/properties
-  version: 51463bfca2576e06c62a8504b5c0f06d61312647
+  version: 7757cc9fdb852f7579b24170bcacda2c7471bb6a
   subpackages:
   - assert
 - name: github.com/mitchellh/mapstructure
-  version: d0303fe809921458f417bcf828397a65db30a7e4
+  version: 3536a929edddb9a5b34bd6861dc4a9647cb459fe
 - name: github.com/modern-go/concurrent
   version: bacd9c7ef1dd9b15be4a9909b8ac7a4e313eec94
 - name: github.com/modern-go/reflect2
-  version: 58118c1ea9161250907268a484af4dd6ed314280
-- name: github.com/pelletier/go-buffruneio
-  version: c37440a7cf42ac63b919c752ca73a85067e05992
+  version: 94122c33edd36123c84d5368cfb2b69df93a0ec8
 - name: github.com/pelletier/go-toml
-  version: fe7536c3dee2596cdd23ee9976a17c22bdaae286
+  version: 27c6b39a135b7dc87a14afb068809132fb7a9a8f
+- name: github.com/pkg/errors
+  version: 856c240a51a2bf8fb8269ea7f3f9b046aadde36e
+- name: github.com/pmezard/go-difflib
+  version: 5d4384ee4fb2527b0a1256a821ebfc92f91efefc
+  subpackages:
+  - difflib
 - name: github.com/sirupsen/logrus
-  version: ad15b42461921f1fb3529b058c6786c6a45d5162
+  version: cdb2f3857cfba7388d28dfe38316b0a39e694215
 - name: github.com/spf13/afero
-  version: 9be650865eab0c12963d8753212f4f9c66cdcf12
+  version: f4711e4db9e9a1d3887343acb72b2bbfc2f686f5
   subpackages:
   - mem
 - name: github.com/spf13/cast
-  version: acbeb36b902d72a7a4c18e8f3241075e7ab763e4
+  version: 8c9545af88b134710ab1cd196795e7f2388358d7
 - name: github.com/spf13/jwalterweatherman
-  version: 0efa5202c04663c757d84f90f5219c1250baf94f
+  version: 94f6ae3ed3bceceafa716478c5fbf8d29ca601a1
 - name: github.com/spf13/pflag
-  version: e57e3eeb33f795204c1ca35f56c44f83227c6e66
+  version: 24fa6976df40757dce6aea913e7b81ade90530e1
 - name: github.com/spf13/viper
-  version: 0967fc9aceab2ce9da34061253ac10fb99bba5b2
+  version: d104d259b3380cb653bb793756823c3c41b37b53
+- name: github.com/stretchr/objx
+  version: c61a9dfcced1815e7d40e214d00d1a8669a9f58c
 - name: github.com/stretchr/testify
-  version: f35b8ab0b5a2cef36673838d662e249dd9c94686
+  version: 3f658bd5ac42cc0b5de5b427e95a480d5726ea76
   subpackages:
   - assert
   - mock
   - require
 - name: github.com/tilinna/clock
   version: 74440910e8079f06acc329aa13666873e93980ea
-- name: github.com/whyrusleeping/go-logging
-  version: 0457bb6b88fc1973573aaf6b5145d8d3ae972390
+- name: github.com/zenoss/zing-proto
+  version: 93eb892846b16fd39492bbe6e6d0a147ba4194f2
+  subpackages:
+  - go/cloud/data_receiver
+  - go/model
 - name: golang.org/x/crypto
-  version: 81e90905daefcd6fd217b62423c0908922eadb30
+  version: a4c6cb3142f211c99e4bf4cd769535b29a9b616f
   subpackages:
   - ssh/terminal
 - name: golang.org/x/net
-  version: 1c05540f6879653db88113bc4a2b70aec4bd491f
+  version: 3a22650c66bd7f4fb6d1e8072ffd7b75c8a27898
   subpackages:
   - bpf
   - context
+  - http/httpguts
   - http2
   - http2/hpack
   - idna
@@ -144,36 +149,60 @@ imports:
   - internal/socket
   - internal/timeseries
   - ipv6
-  - lex/httplex
   - trace
 - name: golang.org/x/sys
-  version: 810d7000345868fc619eb81f46307107118f4ae1
+  version: 90b0e4468f9980bf79a2290394adaf7f045c5d24
   subpackages:
   - unix
   - windows
 - name: golang.org/x/text
-  version: b19bf474d317b857955b12035d2c5acb57ce8b01
+  version: 6c92c7dc7f53607809182301b96e4cc1975143f1
   subpackages:
   - secure/bidirule
   - transform
   - unicode/bidi
   - unicode/norm
 - name: golang.org/x/time
-  version: fbb02b2291d28baffd63558aa44b4b56f178d650
+  version: 85acf8d2951cb2a3bde7632f9ff273ef0379bcbd
   subpackages:
   - rate
 - name: google.golang.org/genproto
-  version: 4b09977fb92221987e99d190c8f88f2c92727a29
+  version: 082222b4a5c572e33e82ee9162d1352c7cf38682
   subpackages:
   - googleapis/rpc/status
+- name: google.golang.org/grpc
+  version: 29c406a5bd0ed61c5752d00c6aabd9fa036ed328
+  subpackages:
+  - balancer
+  - balancer/base
+  - balancer/roundrobin
+  - binarylog/grpc_binarylog_v1
+  - codes
+  - connectivity
+  - credentials
+  - credentials/internal
+  - encoding
+  - encoding/proto
+  - grpclog
+  - internal
+  - internal/backoff
+  - internal/binarylog
+  - internal/channelz
+  - internal/envconfig
+  - internal/grpcrand
+  - internal/grpcsync
+  - internal/syscall
+  - internal/transport
+  - keepalive
+  - metadata
+  - naming
+  - peer
+  - resolver
+  - resolver/dns
+  - resolver/passthrough
+  - stats
+  - status
+  - tap
 - name: gopkg.in/yaml.v2
-  version: cd8b52f8269e0feb286dfeef29f8fe4d5b397e0b
-testImports:
-- name: github.com/davecgh/go-spew
-  version: 782f4967f2dc4564575ca782fe2d04090b5faca8
-  subpackages:
-  - spew
-- name: github.com/pmezard/go-difflib
-  version: 792786c7400a136282c1664665ae0a8db921c6c2
-  subpackages:
-  - difflib
+  version: 51d6538a90f86fe93ac480b35f37b2be17fef232
+testImports: []
