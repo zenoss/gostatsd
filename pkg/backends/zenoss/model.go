@@ -6,6 +6,7 @@ import (
 	"hash/crc32"
 	"sort"
 
+	structpb "github.com/golang/protobuf/ptypes/struct"
 	proto "github.com/zenoss/zing-proto/go/cloud/data_receiver"
 )
 
@@ -22,15 +23,28 @@ func NewModeler() *Modeler {
 }
 
 // AddDimensions TODO
-func (m *Modeler) AddDimensions(timestamp int64, dimensions map[string]string) {
-	if len(dimensions) < 1 {
+func (m *Modeler) AddDimensions(timestamp int64, tagTypes *TagTypes) {
+	if len(tagTypes.ModelDimensionTags) < 1 {
 		return
 	}
 
-	m.buffer[maphash(dimensions)] = &proto.Model{
+	m.buffer[maphash(tagTypes.ModelDimensionTags)] = &proto.Model{
 		Timestamp:  timestamp,
-		Dimensions: dimensions,
+		Dimensions: tagTypes.ModelDimensionTags,
+		Fields:     metadataFromStringMap(tagTypes.ModelMetadataTags),
 	}
+}
+
+func metadataFromStringMap(m map[string]string) *structpb.Struct {
+	fields := make(map[string]*structpb.Value, len(m))
+	for k, v := range m {
+		fields[k] = &structpb.Value{
+			Kind: &structpb.Value_StringValue{
+				StringValue: v,
+			},
+		}
+	}
+	return &structpb.Struct{Fields: fields}
 }
 
 // GetModels TODO

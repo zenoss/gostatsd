@@ -43,9 +43,10 @@ const (
 	paramInsecureTLS         = "insecure-tls"
 	paramAPIKey              = "api-key"
 	paramMetricsPerBatch     = "metrics-per-batch"
-	paramMetricMetadataTags  = "metric-metadata-tags"
 	paramMetricDimensionTags = "metric-dimension-tags"
+	paramMetricMetadataTags  = "metric-metadata-tags"
 	paramModelDimensionTags  = "model-dimension-tags"
+	paramModelMetadataTags   = "model-metadata-tags"
 	paramTweaks              = "tweaks"
 
 	// zenoss tweaks for non-standard and testing behavior.
@@ -67,9 +68,10 @@ type Client struct {
 	// zenoss options
 	apiKey              string
 	metricsPerBatch     int
-	metricMetadataTags  *Set
 	metricDimensionTags *Set
+	metricMetadataTags  *Set
 	modelDimensionTags  *Set
+	modelMetadataTags   *Set
 	tweaks              *Set
 
 	// gostatsd options
@@ -90,6 +92,7 @@ func NewClientFromViper(v *viper.Viper) (gostatsd.Backend, error) {
 	z.SetDefault(paramMetricDimensionTags, []string{})
 	z.SetDefault(paramMetricMetadataTags, []string{})
 	z.SetDefault(paramModelDimensionTags, []string{})
+	z.SetDefault(paramModelMetadataTags, []string{})
 	z.SetDefault(paramTweaks, []string{})
 
 	return NewClient(
@@ -101,6 +104,7 @@ func NewClientFromViper(v *viper.Viper) (gostatsd.Backend, error) {
 		z.GetStringSlice(paramMetricDimensionTags),
 		z.GetStringSlice(paramMetricMetadataTags),
 		z.GetStringSlice(paramModelDimensionTags),
+		z.GetStringSlice(paramModelMetadataTags),
 		z.GetStringSlice(paramTweaks),
 		gostatsd.DisabledSubMetrics(v),
 	)
@@ -116,6 +120,7 @@ func NewClient(
 	metricDimensionTags []string,
 	metricMetadataTags []string,
 	modelDimensionTags []string,
+	modelMetadataTags []string,
 	tweaks []string,
 	disabledSubtypes gostatsd.TimerSubtypes) (*Client, error) {
 
@@ -184,6 +189,7 @@ func NewClient(
 		metricDimensionTags: NewSetFromStrings(metricDimensionTags),
 		metricMetadataTags:  NewSetFromStrings(metricMetadataTags),
 		modelDimensionTags:  NewSetFromStrings(modelDimensionTags),
+		modelMetadataTags:   NewSetFromStrings(modelMetadataTags),
 		tweaks:              tweakSet,
 		disabledSubtypes:    disabledSubtypes,
 	}, nil
@@ -244,19 +250,19 @@ func (c *Client) processMetrics(timestamp int64, metrics *gostatsd.MetricMap, mo
 	metrics.Gauges.Each(func(key, tagsKey string, gauge gostatsd.Gauge) {
 		tagTypes = c.getTags(gauge.Tags)
 		zmetrics = c.appendMetric(zmetrics, float64(gauge.Value), timestamp, tagTypes, key)
-		modeler.AddDimensions(timestamp, tagTypes.ModelDimensionTags)
+		modeler.AddDimensions(timestamp, tagTypes)
 	})
 
 	metrics.Counters.Each(func(key, tagsKey string, counter gostatsd.Counter) {
 		tagTypes = c.getTags(counter.Tags)
 		zmetrics = c.appendMetricf(zmetrics, float64(counter.PerSecond), timestamp, tagTypes, "%s.rate", key)
 		zmetrics = c.appendMetricf(zmetrics, float64(counter.Value), timestamp, tagTypes, "%s.count", key)
-		modeler.AddDimensions(timestamp, tagTypes.ModelDimensionTags)
+		modeler.AddDimensions(timestamp, tagTypes)
 	})
 
 	metrics.Timers.Each(func(key, tagsKey string, timer gostatsd.Timer) {
 		tagTypes = c.getTags(timer.Tags)
-		modeler.AddDimensions(timestamp, tagTypes.ModelDimensionTags)
+		modeler.AddDimensions(timestamp, tagTypes)
 
 		if !c.disabledSubtypes.Lower {
 			zmetrics = c.appendMetricf(zmetrics, timer.Min, timestamp, tagTypes, "%s.lower", key)
@@ -294,7 +300,7 @@ func (c *Client) processMetrics(timestamp int64, metrics *gostatsd.MetricMap, mo
 	metrics.Sets.Each(func(key, tagsKey string, set gostatsd.Set) {
 		tagTypes = c.getTags(set.Tags)
 		zmetrics = c.appendMetric(zmetrics, float64(len(set.Values)), timestamp, tagTypes, key)
-		modeler.AddDimensions(timestamp, tagTypes.ModelDimensionTags)
+		modeler.AddDimensions(timestamp, tagTypes)
 	})
 
 	return zmetrics
@@ -305,6 +311,7 @@ type TagTypes struct {
 	MetricDimensionTags map[string]string
 	MetricMetadataTags  map[string]*model.AnyArray
 	ModelDimensionTags  map[string]string
+	ModelMetadataTags   map[string]string
 }
 
 func (c *Client) getTags(tags gostatsd.Tags) *TagTypes {
@@ -312,6 +319,7 @@ func (c *Client) getTags(tags gostatsd.Tags) *TagTypes {
 		MetricDimensionTags: map[string]string{},
 		MetricMetadataTags:  map[string]*model.AnyArray{},
 		ModelDimensionTags:  map[string]string{},
+		ModelMetadataTags:   map[string]string{},
 	}
 
 	tagKey := ""
@@ -344,6 +352,10 @@ func (c *Client) getTags(tags gostatsd.Tags) *TagTypes {
 
 		if c.modelDimensionTags.Has(tagKey) {
 			tagTypes.ModelDimensionTags[tagKey] = tagValue
+		}
+
+		if c.modelMetadataTags.Has(tagKey) {
+			tagTypes.ModelMetadataTags[tagKey] = tagValue
 		}
 	}
 
