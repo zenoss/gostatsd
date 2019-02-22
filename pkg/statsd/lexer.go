@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"strconv"
+	"strings"
 
 	"github.com/atlassian/gostatsd"
 	"github.com/atlassian/gostatsd/pkg/pool"
@@ -122,7 +123,7 @@ func lexKeySep(l *lexer) stateFn {
 			l.input[l.pos-1] = '-'
 		case ' ', '\t':
 			l.input[l.pos-1] = '_'
-		case ':':
+		case ':', ',':
 			return lexKey
 		case eof:
 			l.err = errMissingKeySep
@@ -329,7 +330,32 @@ func lexKey(l *lexer) stateFn {
 		l.m.Name = l.namespace + "." + l.m.Name
 	}
 	l.start = l.pos
+	if l.input[l.pos-1] == ',' {
+		return lexInfluxTags
+	}
 	return lexValueSep
+}
+
+// lex Influx/telegraf statsd tags.
+func lexInfluxTags(l *lexer) stateFn {
+	var tag string
+	for {
+		b := l.next()
+		switch b {
+		case eof:
+			l.err = errNotEnoughData
+			return nil
+		case ',', ':':
+			if l.pos-1 > l.start {
+				tag = string(l.input[l.start : l.pos-1])
+				l.tags = append(l.tags, strings.Replace(tag, "=", ":", -1))
+			}
+			l.start = l.pos
+			if b == ':' {
+				return lexValueSep
+			}
+		}
+	}
 }
 
 // lex until we find the pipe separator between value and modifier.

@@ -28,7 +28,7 @@ func TestMetricsLexer(t *testing.T) {
 		"smp.gge:1|g|#fo_o:ba-r":        {Name: "smp.gge", Value: 1, Type: gostatsd.GAUGE, Rate: 1.0, Tags: gostatsd.Tags{"fo_o:ba-r"}},
 		"smp gge:1|g":                   {Name: "smp_gge", Value: 1, Type: gostatsd.GAUGE, Rate: 1.0},
 		"smp/gge:1|g":                   {Name: "smp-gge", Value: 1, Type: gostatsd.GAUGE, Rate: 1.0},
-		"smp,gge$:1|g":                  {Name: "smpgge", Value: 1, Type: gostatsd.GAUGE, Rate: 1.0},
+		"smp*gge$:1|g":                  {Name: "smpgge", Value: 1, Type: gostatsd.GAUGE, Rate: 1.0},
 		"un1qu3:john|s":                 {Name: "un1qu3", StringValue: "john", Type: gostatsd.SET, Rate: 1.0},
 		"un1qu3:john|s|#some:42":        {Name: "un1qu3", StringValue: "john", Type: gostatsd.SET, Rate: 1.0, Tags: gostatsd.Tags{"some:42"}},
 		"da-sh:1|s":                     {Name: "da-sh", StringValue: "1", Type: gostatsd.SET, Rate: 1.0},
@@ -39,6 +39,14 @@ func TestMetricsLexer(t *testing.T) {
 		"a:1|g|#":                       {Name: "a", Value: 1, Type: gostatsd.GAUGE, Rate: 1.0},
 		"a:1|g|#,":                      {Name: "a", Value: 1, Type: gostatsd.GAUGE, Rate: 1.0},
 		"a:1|g|#,,":                     {Name: "a", Value: 1, Type: gostatsd.GAUGE, Rate: 1.0},
+		"a,:1|g":                        {Name: "a", Value: 1, Type: gostatsd.GAUGE, Rate: 1.0},
+		"a,,:1|g":                       {Name: "a", Value: 1, Type: gostatsd.GAUGE, Rate: 1.0},
+		"a,f:1|g":                       {Name: "a", Value: 1, Type: gostatsd.GAUGE, Rate: 1.0, Tags: gostatsd.Tags{"f"}},
+		"a,,f:1|g":                      {Name: "a", Value: 1, Type: gostatsd.GAUGE, Rate: 1.0, Tags: gostatsd.Tags{"f"}},
+		"a,,f,:1|g":                     {Name: "a", Value: 1, Type: gostatsd.GAUGE, Rate: 1.0, Tags: gostatsd.Tags{"f"}},
+		"a,,f,,:1|g":                    {Name: "a", Value: 1, Type: gostatsd.GAUGE, Rate: 1.0, Tags: gostatsd.Tags{"f"}},
+		"a,f=x:1|g":                     {Name: "a", Value: 1, Type: gostatsd.GAUGE, Rate: 1.0, Tags: gostatsd.Tags{"f:x"}},
+		"a,f=x,z=y:1|g":                 {Name: "a", Value: 1, Type: gostatsd.GAUGE, Rate: 1.0, Tags: gostatsd.Tags{"f:x", "z:y"}},
 	}
 
 	compareMetric(t, tests, "")
@@ -46,7 +54,14 @@ func TestMetricsLexer(t *testing.T) {
 
 func TestInvalidMetricsLexer(t *testing.T) {
 	t.Parallel()
-	failing := []string{"fOO|bar:bazkk", "foo.bar.baz:1|q", "NaN.should.be:NaN|g"}
+	failing := []string{
+		"fOO|bar:bazkk",
+		"foo.bar.baz:1|q",
+		"NaN.should.be:NaN|g",
+		"key,tag",   // no value separator
+		"key,tag|g", // no value separator
+	}
+
 	for _, tc := range failing {
 		tc := tc
 		t.Run(tc, func(t *testing.T) {
@@ -206,4 +221,7 @@ func BenchmarkParseCounterWithDefaultTagsAndTags(b *testing.B) {
 }
 func BenchmarkParseCounterWithDefaultTagsAndTagsAndNameSpace(b *testing.B) {
 	benchmarkLexer(&DatagramParser{namespace: "stats"}, "foo.bar.baz:2|c|#foo:bar,baz", b)
+}
+func BenchmarkParseCounterWithInfluxTags(b *testing.B) {
+	benchmarkLexer(&DatagramParser{}, "foo.bar.baz,foo=bar,baz:2|c", b)
 }
