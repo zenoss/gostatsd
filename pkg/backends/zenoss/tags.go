@@ -77,7 +77,6 @@ func (c *Client) getTags(tags gostatsd.Tags) *TagTypes {
 		}
 	}
 
-	zlog().Debug(modelMetadataLists)
 	for k, v := range modelMetadataLists {
 		modelMetadataFields[k] = valueFromStringSlice(v)
 	}
@@ -88,7 +87,6 @@ func (c *Client) getTags(tags gostatsd.Tags) *TagTypes {
 }
 
 func parseTag(tag string) *TagParts {
-	zlog().Debug(tag)
 	tagParts := &TagParts{}
 
 	match := tagRegexp.FindStringSubmatch(tag)
@@ -112,7 +110,6 @@ func parseTag(tag string) *TagParts {
 		tagParts.Value = "true"
 	}
 
-	zlog().Debug(tagParts)
 	return tagParts
 }
 
