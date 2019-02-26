@@ -12,16 +12,11 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 
-	"github.com/golang/protobuf/ptypes"
-	"github.com/golang/protobuf/ptypes/any"
-	"github.com/golang/protobuf/ptypes/wrappers"
-
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 
 	proto "github.com/zenoss/zing-proto/go/cloud/data_receiver"
-	"github.com/zenoss/zing-proto/go/model"
 )
 
 const (
@@ -132,6 +127,7 @@ func NewClient(
 		paramMetricDimensionTags: metricDimensionTags,
 		paramMetricMetadataTags:  metricMetadataTags,
 		paramModelDimensionTags:  modelDimensionTags,
+		paramModelMetadataTags:   modelMetadataTags,
 		paramTweaks:              tweaks,
 		paramDisabledSubMetrics:  disabledSubtypes,
 	}).Info("creating client")
@@ -304,71 +300,6 @@ func (c *Client) processMetrics(timestamp int64, metrics *gostatsd.MetricMap, mo
 	})
 
 	return zmetrics
-}
-
-// TagTypes TODO
-type TagTypes struct {
-	MetricDimensionTags map[string]string
-	MetricMetadataTags  map[string]*model.AnyArray
-	ModelDimensionTags  map[string]string
-	ModelMetadataTags   map[string]string
-}
-
-func (c *Client) getTags(tags gostatsd.Tags) *TagTypes {
-	tagTypes := &TagTypes{
-		MetricDimensionTags: map[string]string{},
-		MetricMetadataTags:  map[string]*model.AnyArray{},
-		ModelDimensionTags:  map[string]string{},
-		ModelMetadataTags:   map[string]string{},
-	}
-
-	tagKey := ""
-	tagValue := ""
-
-	for _, tag := range tags {
-		if strings.Contains(tag, ":") {
-			parts := strings.SplitN(tag, ":", 2)
-			tagKey = parts[0]
-			tagValue = parts[1]
-		} else {
-			tagKey = tag
-			tagValue = "true"
-		}
-
-		if c.metricDimensionTags.Has(tagKey) {
-			tagTypes.MetricDimensionTags[tagKey] = tagValue
-		}
-
-		if c.metricMetadataTags.Has(tagKey) {
-			tagTypes.MetricMetadataTags[tagKey] = toAnyArray(tagValue)
-
-			// When the tagged-metrics tweak is used, we want to send all
-			// metric-metadata-tags and metric-dimension-tags as tags. So
-			// we'll stash them all in tagTypes.MetricDimensionTags.
-			if c.tweaks.Has(tweakTaggedMetrics) {
-				tagTypes.MetricDimensionTags[tagKey] = tagValue
-			}
-		}
-
-		if c.modelDimensionTags.Has(tagKey) {
-			tagTypes.ModelDimensionTags[tagKey] = tagValue
-		}
-
-		if c.modelMetadataTags.Has(tagKey) {
-			tagTypes.ModelMetadataTags[tagKey] = tagValue
-		}
-	}
-
-	return tagTypes
-}
-
-func toAnyArray(s string) *model.AnyArray {
-	av, err := ptypes.MarshalAny(&wrappers.StringValue{Value: s})
-	if err != nil {
-		return &model.AnyArray{}
-	}
-
-	return &model.AnyArray{Value: []*any.Any{av}}
 }
 
 func (c *Client) appendMetricf(metrics []*proto.Metric, value float64, timestamp int64, tagTypes *TagTypes, nameFormat string, a ...interface{}) []*proto.Metric {

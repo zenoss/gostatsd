@@ -31,7 +31,7 @@ func (m *Modeler) AddDimensions(timestamp int64, tagTypes *TagTypes) {
 	m.buffer[maphash(tagTypes.ModelDimensionTags)] = &proto.Model{
 		Timestamp:  timestamp,
 		Dimensions: tagTypes.ModelDimensionTags,
-		Fields:     metadataFromStringMap(tagTypes.ModelMetadataTags),
+		Fields:     tagTypes.ModelMetadataTags,
 	}
 }
 
