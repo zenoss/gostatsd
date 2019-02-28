@@ -142,6 +142,7 @@ func NewClient(
 		return nil, fmt.Errorf("[%s] %s must be specified", BackendName, paramAPIKey)
 	}
 
+	// PutMetrics is used by default.
 	tweakSet := NewSetFromStrings(tweaks)
 	if tweakSet.Has(tweakUsePublishMetrics) && tweakSet.Has(tweakUsePutMetric) {
 		return nil, fmt.Errorf(
@@ -149,20 +150,6 @@ func NewClient(
 			BackendName,
 			tweakUsePublishMetrics,
 			tweakUsePutMetric)
-	}
-
-	// The default PutMetrics service only supports canonical metrics.
-	apiSupportsTags :=
-		tweakSet.Has(tweakUsePublishMetrics) ||
-			tweakSet.Has(tweakUsePutMetric)
-
-	if tweakSet.Has(tweakTaggedMetrics) && !apiSupportsTags {
-		return nil, fmt.Errorf(
-			"[%s] %s requires that either %s or %s be set",
-			BackendName,
-			tweakTaggedMetrics,
-			tweakUsePublishMetrics,
-			tweakUsePublishMetrics)
 	}
 
 	var opt grpc.DialOption
@@ -438,13 +425,29 @@ func (c *Client) getPutMetricsBatches(inMetrics []*proto.Metric) []*proto.Metric
 			batchSize = len(inMetrics)
 		}
 
-		batches = append(
-			batches,
-			&proto.Metrics{
-				DetailedResponse: true,
-				Metrics:          inMetrics[:batchSize],
-			},
-		)
+		if c.tweaks.Has(tweakTaggedMetrics) {
+			inTaggedMetricsBatch := make([]*proto.TaggedMetric, batchSize)
+
+			for i, inMetric := range inMetrics[:batchSize] {
+				inTaggedMetricsBatch[i] = taggedMetricFromCanonical(inMetric)
+			}
+
+			batches = append(
+				batches,
+				&proto.Metrics{
+					DetailedResponse: true,
+					TaggedMetrics:    inTaggedMetricsBatch,
+				},
+			)
+		} else {
+			batches = append(
+				batches,
+				&proto.Metrics{
+					DetailedResponse: true,
+					Metrics:          inMetrics[:batchSize],
+				},
+			)
+		}
 
 		inMetrics = inMetrics[batchSize:]
 	}
@@ -470,12 +473,7 @@ func (c *Client) putMetricStream(ctx context.Context, timestamp int64, metrics [
 		if c.tweaks.Has(tweakTaggedMetrics) {
 			metricWrapper = &proto.MetricWrapper{
 				MetricType: &proto.MetricWrapper_Tagged{
-					Tagged: &proto.TaggedMetric{
-						Metric:    metric.Metric,
-						Timestamp: metric.Timestamp,
-						Value:     metric.Value,
-						Tags:      metric.Dimensions,
-					},
+					Tagged: taggedMetricFromCanonical(metric),
 				},
 			}
 		} else {
@@ -500,6 +498,15 @@ func (c *Client) putMetricStream(ctx context.Context, timestamp int64, metrics [
 	}
 
 	return errs
+}
+
+func taggedMetricFromCanonical(canonical *proto.Metric) *proto.TaggedMetric {
+	return &proto.TaggedMetric{
+		Metric:    canonical.Metric,
+		Timestamp: canonical.Timestamp,
+		Value:     canonical.Value,
+		Tags:      canonical.Dimensions,
+	}
 }
 
 func getSubViper(v *viper.Viper, key string) *viper.Viper {
