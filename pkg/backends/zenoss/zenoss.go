@@ -23,11 +23,10 @@ const (
 	// BackendName is required by gostatsd.
 	BackendName = "zenoss"
 
-	defaultDisableTLS       = false
-	defaultInsecureTLS      = false
-	defaultDisableStreaming = false
-	defaultMetricsPerBatch  = 1000
-	defaultModelInterval    = 1 * time.Minute
+	defaultDisableTLS      = false
+	defaultInsecureTLS     = false
+	defaultMetricsPerBatch = 1000
+	defaultModelInterval   = 1 * time.Minute
 
 	// gostatsd parameters.
 	paramDisabledSubMetrics = "disabled-sub-metrics"
