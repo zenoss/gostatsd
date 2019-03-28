@@ -16,7 +16,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 
-	proto "github.com/zenoss/zing-proto/go/cloud/data_receiver"
+	proto "github.com/zenoss/zenoss-protobufs/go/cloud/data_receiver"
 )
 
 const (
@@ -44,10 +44,9 @@ const (
 	paramTweaks              = "tweaks"
 
 	// zenoss tweaks for non-standard and testing behavior.
-	tweakNoModels          = "no-models"
-	tweakTaggedMetrics     = "tagged-metrics"
-	tweakUsePublishMetrics = "use-PublishMetrics"
-	tweakUsePutMetric      = "use-PutMetric"
+	tweakNoModels      = "no-models"
+	tweakTaggedMetrics = "tagged-metrics"
+	tweakUsePutMetric  = "use-PutMetric"
 )
 
 // Name returns the name of the backend.
@@ -141,16 +140,6 @@ func NewClient(
 		return nil, fmt.Errorf("[%s] %s must be specified", BackendName, paramAPIKey)
 	}
 
-	// PutMetrics is used by default.
-	tweakSet := NewSetFromStrings(tweaks)
-	if tweakSet.Has(tweakUsePublishMetrics) && tweakSet.Has(tweakUsePutMetric) {
-		return nil, fmt.Errorf(
-			"[%s] %s and %s tweaks are mutually exclusive",
-			BackendName,
-			tweakUsePublishMetrics,
-			tweakUsePutMetric)
-	}
-
 	var opt grpc.DialOption
 	if disableTLS {
 		opt = grpc.WithInsecure()
@@ -172,7 +161,7 @@ func NewClient(
 		metricMetadataTags:  NewSetFromStrings(metricMetadataTags),
 		modelDimensionTags:  NewSetFromStrings(modelDimensionTags),
 		modelMetadataTags:   NewSetFromStrings(modelMetadataTags),
-		tweaks:              tweakSet,
+		tweaks:              NewSetFromStrings(tweaks),
 		disabledSubtypes:    disabledSubtypes,
 	}, nil
 }
@@ -214,9 +203,7 @@ func (c *Client) SendMetricsAsync(ctx context.Context, metrics *gostatsd.MetricM
 		}
 
 		if len(zmetrics) > 0 {
-			if c.tweaks.Has(tweakUsePublishMetrics) {
-				errs = append(errs, c.publishMetrics(ctx, timestamp, zmetrics)...)
-			} else if c.tweaks.Has(tweakUsePutMetric) {
+			if c.tweaks.Has(tweakUsePutMetric) {
 				errs = append(errs, c.putMetricStream(ctx, timestamp, zmetrics)...)
 			} else {
 				errs = append(errs, c.putMetrics(ctx, timestamp, zmetrics)...)
@@ -296,11 +283,11 @@ func (c *Client) appendMetric(metrics []*proto.Metric, value float64, timestamp 
 	return append(
 		metrics,
 		&proto.Metric{
-			Metric:     name,
-			Timestamp:  timestamp,
-			Dimensions: tagTypes.MetricDimensionTags,
-			Metadata:   tagTypes.MetricMetadataTags,
-			Value:      value,
+			Metric:         name,
+			Timestamp:      timestamp,
+			Dimensions:     tagTypes.MetricDimensionTags,
+			MetadataFields: tagTypes.MetricMetadataTags,
+			Value:          value,
 		},
 	)
 }
@@ -326,70 +313,6 @@ func (c *Client) publishModels(ctx context.Context, modelBatches []*proto.ModelB
 	}
 
 	return errs
-}
-
-func (c *Client) publishMetrics(ctx context.Context, timestamp int64, metrics []*proto.Metric) []error {
-	const rpc = "PublishMetrics"
-	errs := []error{}
-
-	for _, b := range c.getPublishMetricsBatches(metrics) {
-		zlogRPCWithField(rpc, "count", len(b.Metrics)).Debug("sending metric batch")
-
-		_, err := c.client.PublishMetrics(ctx, b)
-		if err != nil {
-			zlogRPCWithError(rpc, err).Error("error sending metric batch")
-			errs = append(errs, err)
-		} else {
-			zlogRPC(rpc).Debug("sent metric batch")
-		}
-	}
-
-	return errs
-}
-
-func (c *Client) getPublishMetricsBatches(inMetrics []*proto.Metric) []*proto.MetricBatch {
-	batchSize := c.metricsPerBatch
-	batches := make([]*proto.MetricBatch, 0, int(len(inMetrics)%batchSize)+1)
-
-	var metricWrapper *proto.MetricWrapper
-
-	for len(inMetrics) > 0 {
-		if len(inMetrics) < batchSize {
-			batchSize = len(inMetrics)
-		}
-
-		metricWrappers := make([]*proto.MetricWrapper, 0, batchSize)
-		for _, inMetric := range inMetrics[:batchSize] {
-			if c.tweaks.Has(tweakTaggedMetrics) {
-				metricWrapper = &proto.MetricWrapper{
-					MetricType: &proto.MetricWrapper_Tagged{
-						Tagged: &proto.TaggedMetric{
-							Metric:    inMetric.Metric,
-							Timestamp: inMetric.Timestamp,
-							Value:     inMetric.Value,
-							Tags:      inMetric.Dimensions,
-						},
-					},
-				}
-			} else {
-				metricWrapper = &proto.MetricWrapper{
-					MetricType: &proto.MetricWrapper_Canonical{
-						Canonical: inMetric,
-					},
-				}
-			}
-
-			metricWrappers = append(metricWrappers, metricWrapper)
-		}
-
-		batches = append(
-			batches,
-			&proto.MetricBatch{Metrics: metricWrappers})
-
-		inMetrics = inMetrics[batchSize:]
-	}
-
-	return batches
 }
 
 func (c *Client) putMetrics(ctx context.Context, timestamp int64, metrics []*proto.Metric) []error {

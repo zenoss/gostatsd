@@ -7,7 +7,7 @@ import (
 	"sort"
 
 	structpb "github.com/golang/protobuf/ptypes/struct"
-	proto "github.com/zenoss/zing-proto/go/cloud/data_receiver"
+	proto "github.com/zenoss/zenoss-protobufs/go/cloud/data_receiver"
 )
 
 // Modeler TODO

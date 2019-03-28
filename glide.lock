@@ -1,5 +1,5 @@
-hash: d8a79cf0e6e09eb6b27374decc671f4925fd0a6cdb2c6b08b9148b9a6a4b1fd6
-updated: 2019-02-19T21:04:55.608720916Z
+hash: 96e950688c6e6bdfd88b60215dca84153aadc6eddb62ef9c2e9a1c06073cc338
+updated: 2019-03-27T14:49:00.778427-04:00
 imports:
 - name: github.com/ash2k/stager
   version: 6e9c7b0eacd465286fac042bfb29a170aa8c2c3f
@@ -45,7 +45,7 @@ imports:
 - name: github.com/go-ini/ini
   version: ece0e89bb05aec0d6768f7bc1e77f11f03da0d11
 - name: github.com/go-redis/redis
-  version: 22be8a3eaf992c828cecb69dc07348313bf08d2e
+  version: d22fde8721cc915a55aeb6b00944a76a92bfeb6e
   subpackages:
   - internal
   - internal/consistenthash
@@ -54,7 +54,7 @@ imports:
   - internal/proto
   - internal/util
 - name: github.com/golang/protobuf
-  version: aa810b61a9c79d51363740d207bb46cf8e620ed5
+  version: b5d812f8a3706043e23a9cd5babf2e5423744d30
   subpackages:
   - proto
   - ptypes
@@ -62,7 +62,6 @@ imports:
   - ptypes/duration
   - ptypes/struct
   - ptypes/timestamp
-  - ptypes/wrappers
 - name: github.com/gorilla/mux
   version: 8559a4f775fc329165fe32bd4c2543de8ada8fce
 - name: github.com/hashicorp/hcl
@@ -80,7 +79,7 @@ imports:
 - name: github.com/jmespath/go-jmespath
   version: c2b33e8439af944379acbdd9c3a5fe0bc44bd8a5
 - name: github.com/json-iterator/go
-  version: 1624edc4454b8682399def8740d46db5e4362ba4
+  version: 0ff49de124c6f76f8494e194af75bde0f1a49a29
 - name: github.com/konsorten/go-windows-terminal-sequences
   version: 5c8c8bd35d3832f5d134ae1e1e375b69a4d25242
 - name: github.com/libp2p/go-reuseport
@@ -127,11 +126,10 @@ imports:
   - require
 - name: github.com/tilinna/clock
   version: 74440910e8079f06acc329aa13666873e93980ea
-- name: github.com/zenoss/zing-proto
-  version: 93eb892846b16fd39492bbe6e6d0a147ba4194f2
+- name: github.com/zenoss/zenoss-protobufs
+  version: c98c612bd3866d67f182122eda841545e45a8ccd
   subpackages:
   - go/cloud/data_receiver
-  - go/model
 - name: golang.org/x/crypto
   version: a4c6cb3142f211c99e4bf4cd769535b29a9b616f
   subpackages:
@@ -140,7 +138,6 @@ imports:
   version: 3a22650c66bd7f4fb6d1e8072ffd7b75c8a27898
   subpackages:
   - bpf
-  - context
   - http/httpguts
   - http2
   - http2/hpack

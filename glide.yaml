@@ -30,5 +30,5 @@ import:
   version: ^1.2.0
 - package: github.com/tilinna/clock
   version: 1.0.0
-- package: github.com/zenoss/zing-proto
-  version: 93eb892846b16fd39492bbe6e6d0a147ba4194f2
+- package: github.com/zenoss/zenoss-protobufs
+  version: 0.0.2_39

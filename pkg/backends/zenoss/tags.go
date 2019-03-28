@@ -5,11 +5,7 @@ import (
 	"strconv"
 
 	"github.com/atlassian/gostatsd"
-	"github.com/golang/protobuf/ptypes"
-	"github.com/golang/protobuf/ptypes/any"
 	structpb "github.com/golang/protobuf/ptypes/struct"
-	"github.com/golang/protobuf/ptypes/wrappers"
-	"github.com/zenoss/zing-proto/go/model"
 )
 
 var tagRegexp = regexp.MustCompile(`([^\.\:]+)(?:\.(\d+))?(?:\:(.+)?)`)
@@ -25,7 +21,7 @@ type TagParts struct {
 // TagTypes TODO
 type TagTypes struct {
 	MetricDimensionTags map[string]string
-	MetricMetadataTags  map[string]*model.AnyArray
+	MetricMetadataTags  *structpb.Struct
 	ModelDimensionTags  map[string]string
 	ModelMetadataTags   *structpb.Struct
 }
@@ -33,7 +29,7 @@ type TagTypes struct {
 func (c *Client) getTags(tags gostatsd.Tags) *TagTypes {
 	tt := &TagTypes{
 		MetricDimensionTags: map[string]string{},
-		MetricMetadataTags:  map[string]*model.AnyArray{},
+		MetricMetadataTags:  &structpb.Struct{},
 		ModelDimensionTags:  map[string]string{},
 		ModelMetadataTags:   &structpb.Struct{},
 	}
@@ -41,6 +37,8 @@ func (c *Client) getTags(tags gostatsd.Tags) *TagTypes {
 	var tp *TagParts
 
 	// Support *.# indexed tags into lists.
+	metricMetadataFields := make(map[string]*structpb.Value, len(*c.metricMetadataTags))
+	metricMetadataLists := make(map[string][]string, len(*c.metricMetadataTags))
 	modelMetadataFields := make(map[string]*structpb.Value, len(*c.modelMetadataTags))
 	modelMetadataLists := make(map[string][]string, len(*c.modelMetadataTags))
 
@@ -52,7 +50,13 @@ func (c *Client) getTags(tags gostatsd.Tags) *TagTypes {
 		}
 
 		if c.metricMetadataTags.Has(tp.Key) {
-			tt.MetricMetadataTags[tp.Key] = anyArrayFromString(tp.Value)
+			if tp.Indexed {
+				metricMetadataLists[tp.Key] = append(
+					metricMetadataLists[tp.Key],
+					tp.Value)
+			} else {
+				metricMetadataFields[tp.Key] = valueFromString(tp.Value)
+			}
 
 			// When the tagged-metrics tweak is used, we want to send all
 			// metric-metadata-tags and metric-dimension-tags as tags. So
@@ -76,6 +80,12 @@ func (c *Client) getTags(tags gostatsd.Tags) *TagTypes {
 			}
 		}
 	}
+
+	for k, v := range metricMetadataLists {
+		metricMetadataFields[k] = valueFromStringSlice(v)
+	}
+
+	tt.MetricMetadataTags.Fields = metricMetadataFields
 
 	for k, v := range modelMetadataLists {
 		modelMetadataFields[k] = valueFromStringSlice(v)
@@ -111,15 +121,6 @@ func parseTag(tag string) *TagParts {
 	}
 
 	return tagParts
-}
-
-func anyArrayFromString(s string) *model.AnyArray {
-	av, err := ptypes.MarshalAny(&wrappers.StringValue{Value: s})
-	if err != nil {
-		return &model.AnyArray{}
-	}
-
-	return &model.AnyArray{Value: []*any.Any{av}}
 }
 
 func valueFromString(s string) *structpb.Value {
