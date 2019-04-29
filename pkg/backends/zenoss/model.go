@@ -29,9 +29,9 @@ func (m *Modeler) AddDimensions(timestamp int64, tagTypes *TagTypes) {
 	}
 
 	m.buffer[maphash(tagTypes.ModelDimensionTags)] = &proto.Model{
-		Timestamp:  timestamp,
-		Dimensions: tagTypes.ModelDimensionTags,
-		Fields:     tagTypes.ModelMetadataTags,
+		Timestamp:      timestamp,
+		Dimensions:     tagTypes.ModelDimensionTags,
+		MetadataFields: tagTypes.ModelMetadataTags,
 	}
 }
 
@@ -56,29 +56,6 @@ func (m *Modeler) GetModels() []*proto.Model {
 		i++
 	}
 	return models
-}
-
-// GetModelBatches TODO
-func (m *Modeler) GetModelBatches(batchSize int) []*proto.ModelBatch {
-	models := m.GetModels()
-	batchCount := (len(models) % batchSize) + 1
-	batches := make([]*proto.ModelBatch, 0, batchCount)
-	for len(models) > 0 {
-		if len(models) < batchSize {
-			batchSize = len(models)
-		}
-
-		batches = append(
-			batches,
-			&proto.ModelBatch{
-				Models: models[:batchSize],
-			},
-		)
-
-		models = models[batchSize:]
-	}
-
-	return batches
 }
 
 func maphash(m map[string]string) uint32 {

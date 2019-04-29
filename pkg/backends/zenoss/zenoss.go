@@ -27,6 +27,7 @@ const (
 	defaultInsecureTLS     = false
 	defaultMetricsPerBatch = 1000
 	defaultModelInterval   = 1 * time.Minute
+	defaultModelsPerBatch  = 100
 
 	// gostatsd parameters.
 	paramDisabledSubMetrics = "disabled-sub-metrics"
@@ -41,6 +42,7 @@ const (
 	paramMetricMetadataTags  = "metric-metadata-tags"
 	paramModelDimensionTags  = "model-dimension-tags"
 	paramModelMetadataTags   = "model-metadata-tags"
+	paramModelsPerBatch      = "models-per-batch"
 	paramTweaks              = "tweaks"
 
 	// zenoss tweaks for non-standard and testing behavior.
@@ -65,6 +67,7 @@ type Client struct {
 	metricMetadataTags  *Set
 	modelDimensionTags  *Set
 	modelMetadataTags   *Set
+	modelsPerBatch      int
 	tweaks              *Set
 
 	// gostatsd options
@@ -86,6 +89,7 @@ func NewClientFromViper(v *viper.Viper) (gostatsd.Backend, error) {
 	z.SetDefault(paramMetricMetadataTags, []string{})
 	z.SetDefault(paramModelDimensionTags, []string{})
 	z.SetDefault(paramModelMetadataTags, []string{})
+	z.SetDefault(paramModelsPerBatch, defaultModelsPerBatch)
 	z.SetDefault(paramTweaks, []string{})
 
 	return NewClient(
@@ -98,6 +102,7 @@ func NewClientFromViper(v *viper.Viper) (gostatsd.Backend, error) {
 		z.GetStringSlice(paramMetricMetadataTags),
 		z.GetStringSlice(paramModelDimensionTags),
 		z.GetStringSlice(paramModelMetadataTags),
+		z.GetInt(paramModelsPerBatch),
 		z.GetStringSlice(paramTweaks),
 		gostatsd.DisabledSubMetrics(v),
 	)
@@ -114,6 +119,7 @@ func NewClient(
 	metricMetadataTags []string,
 	modelDimensionTags []string,
 	modelMetadataTags []string,
+	modelsPerBatch int,
 	tweaks []string,
 	disabledSubtypes gostatsd.TimerSubtypes) (*Client, error) {
 
@@ -126,12 +132,16 @@ func NewClient(
 		paramMetricMetadataTags:  metricMetadataTags,
 		paramModelDimensionTags:  modelDimensionTags,
 		paramModelMetadataTags:   modelMetadataTags,
+		paramModelsPerBatch:      modelsPerBatch,
 		paramTweaks:              tweaks,
 		paramDisabledSubMetrics:  disabledSubtypes,
 	}).Info("creating client")
 
 	if metricsPerBatch <= 0 {
 		return nil, fmt.Errorf("[%s] %s must be positive", BackendName, paramMetricsPerBatch)
+	}
+	if modelsPerBatch <= 0 {
+		return nil, fmt.Errorf("[%s] %s must be positive", BackendName, paramModelsPerBatch)
 	}
 	if address == "" {
 		return nil, fmt.Errorf("[%s] %s must be specified", BackendName, paramAddress)
@@ -161,6 +171,7 @@ func NewClient(
 		metricMetadataTags:  NewSetFromStrings(metricMetadataTags),
 		modelDimensionTags:  NewSetFromStrings(modelDimensionTags),
 		modelMetadataTags:   NewSetFromStrings(modelMetadataTags),
+		modelsPerBatch:      modelsPerBatch,
 		tweaks:              NewSetFromStrings(tweaks),
 		disabledSubtypes:    disabledSubtypes,
 	}, nil
@@ -190,7 +201,7 @@ func (c *Client) SendMetricsAsync(ctx context.Context, metrics *gostatsd.MetricM
 		return
 	}
 
-	modelBatches := modeler.GetModelBatches(100)
+	models := modeler.GetModels()
 
 	go func() {
 		var errs = []error{}
@@ -198,15 +209,15 @@ func (c *Client) SendMetricsAsync(ctx context.Context, metrics *gostatsd.MetricM
 
 		ctx = metadata.AppendToOutgoingContext(ctx, "zenoss-api-key", c.apiKey)
 
-		if len(modelBatches) > 0 {
-			errs = append(errs, c.publishModels(ctx, modelBatches)...)
+		if len(models) > 0 {
+			errs = append(errs, c.putModels(ctx, models)...)
 		}
 
 		if len(zmetrics) > 0 {
 			if c.tweaks.Has(tweakUsePutMetric) {
-				errs = append(errs, c.putMetricStream(ctx, timestamp, zmetrics)...)
+				errs = append(errs, c.putMetricStream(ctx, zmetrics)...)
 			} else {
-				errs = append(errs, c.putMetrics(ctx, timestamp, zmetrics)...)
+				errs = append(errs, c.putMetrics(ctx, zmetrics)...)
 			}
 		}
 	}()
@@ -292,8 +303,8 @@ func (c *Client) appendMetric(metrics []*proto.Metric, value float64, timestamp 
 	)
 }
 
-func (c *Client) publishModels(ctx context.Context, modelBatches []*proto.ModelBatch) []error {
-	const rpc = "PublishModels"
+func (c *Client) putModels(ctx context.Context, models []*proto.Model) []error {
+	const rpc = "PutModels"
 	errs := []error{}
 
 	if c.tweaks.Has(tweakNoModels) {
@@ -301,21 +312,49 @@ func (c *Client) publishModels(ctx context.Context, modelBatches []*proto.ModelB
 		return errs
 	}
 
-	for _, b := range modelBatches {
+	for _, b := range c.getPutModelsBatches(models) {
 		zlogRPCWithField(rpc, "count", len(b.Models)).Debug("sending model batch")
-		_, err := c.client.PublishModels(ctx, b)
+
+		putStatus, err := c.client.PutModels(ctx, b)
 		if err != nil {
 			zlogRPCWithError(rpc, err).Error("error sending model batch")
 			errs = append(errs, err)
 		} else {
-			zlogRPC(rpc).Debug("sent model batch")
+			zlogRPCWithFields(rpc, log.Fields{
+				"message":   putStatus.GetMessage(),
+				"succeeded": putStatus.GetSucceeded(),
+				"failed":    putStatus.GetFailed(),
+			}).Debug("sent model batch")
 		}
 	}
 
 	return errs
 }
 
-func (c *Client) putMetrics(ctx context.Context, timestamp int64, metrics []*proto.Metric) []error {
+func (c *Client) getPutModelsBatches(inModels []*proto.Model) []*proto.Models {
+	batchSize := c.modelsPerBatch
+	batches := make([]*proto.Models, 0, int(len(inModels)%batchSize)+1)
+
+	for len(inModels) > 0 {
+		if len(inModels) < batchSize {
+			batchSize = len(inModels)
+		}
+
+		batches = append(
+			batches,
+			&proto.Models{
+				DetailedResponse: true,
+				Models:           inModels[:batchSize],
+			},
+		)
+
+		inModels = inModels[batchSize:]
+	}
+
+	return batches
+}
+
+func (c *Client) putMetrics(ctx context.Context, metrics []*proto.Metric) []error {
 	const rpc = "PutMetrics"
 	errs := []error{}
 
@@ -377,7 +416,7 @@ func (c *Client) getPutMetricsBatches(inMetrics []*proto.Metric) []*proto.Metric
 	return batches
 }
 
-func (c *Client) putMetricStream(ctx context.Context, timestamp int64, metrics []*proto.Metric) []error {
+func (c *Client) putMetricStream(ctx context.Context, metrics []*proto.Metric) []error {
 	const rpc = "PutMetric"
 	errs := []error{}
 

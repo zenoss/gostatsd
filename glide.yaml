@@ -31,4 +31,4 @@ import:
 - package: github.com/tilinna/clock
   version: 1.0.0
 - package: github.com/zenoss/zenoss-protobufs
-  version: 0.0.2_39
+  version: 0.0.3_40

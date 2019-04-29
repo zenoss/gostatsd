@@ -1,5 +1,5 @@
-hash: 96e950688c6e6bdfd88b60215dca84153aadc6eddb62ef9c2e9a1c06073cc338
-updated: 2019-03-27T14:49:00.778427-04:00
+hash: c37896cb40574743de72f9c53344e2e08678055fd3b323ad414635c40abe6ea4
+updated: 2019-04-29T14:15:33.026442-04:00
 imports:
 - name: github.com/ash2k/stager
   version: 6e9c7b0eacd465286fac042bfb29a170aa8c2c3f
@@ -127,7 +127,7 @@ imports:
 - name: github.com/tilinna/clock
   version: 74440910e8079f06acc329aa13666873e93980ea
 - name: github.com/zenoss/zenoss-protobufs
-  version: c98c612bd3866d67f182122eda841545e45a8ccd
+  version: d662912f1d5e4505ffa201a7064be8e41645aec9
   subpackages:
   - go/cloud/data_receiver
 - name: golang.org/x/crypto
