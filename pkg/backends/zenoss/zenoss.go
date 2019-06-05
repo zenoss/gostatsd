@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"runtime"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 
+	"github.com/zenoss/zenoss-protobufs/go/cloud/data_receiver"
 	proto "github.com/zenoss/zenoss-protobufs/go/cloud/data_receiver"
 )
 
@@ -51,6 +53,8 @@ const (
 	tweakUsePutMetric  = "use-PutMetric"
 )
 
+var defaultmaxRequests = uint(2 * runtime.NumCPU())
+
 // Name returns the name of the backend.
 func (*Client) Name() string {
 	return BackendName
@@ -68,6 +72,7 @@ type Client struct {
 	modelDimensionTags  *Set
 	modelMetadataTags   *Set
 	modelsPerBatch      int
+	packetsSemaphore    chan struct{}
 	tweaks              *Set
 
 	// gostatsd options
@@ -91,6 +96,7 @@ func NewClientFromViper(v *viper.Viper) (gostatsd.Backend, error) {
 	z.SetDefault(paramModelMetadataTags, []string{})
 	z.SetDefault(paramModelsPerBatch, defaultModelsPerBatch)
 	z.SetDefault(paramTweaks, []string{})
+	z.SetDefault("maxRequests", defaultmaxRequests)
 
 	return NewClient(
 		z.GetString(paramAddress),
@@ -104,6 +110,7 @@ func NewClientFromViper(v *viper.Viper) (gostatsd.Backend, error) {
 		z.GetStringSlice(paramModelMetadataTags),
 		z.GetInt(paramModelsPerBatch),
 		z.GetStringSlice(paramTweaks),
+		uint(z.GetInt("maxRequests")),
 		gostatsd.DisabledSubMetrics(v),
 	)
 }
@@ -121,6 +128,7 @@ func NewClient(
 	modelMetadataTags []string,
 	modelsPerBatch int,
 	tweaks []string,
+	maxRequests uint,
 	disabledSubtypes gostatsd.TimerSubtypes) (*Client, error) {
 
 	zlogWithFields(log.Fields{
@@ -163,6 +171,9 @@ func NewClient(
 		return nil, fmt.Errorf("[%s] failed to connect: %s", BackendName, err)
 	}
 
+	// Semaphore chanell for server API calls
+	packetsSemaphore := make(chan struct{}, maxRequests)
+
 	return &Client{
 		client:              proto.NewDataReceiverServiceClient(conn),
 		apiKey:              apiKey,
@@ -172,6 +183,7 @@ func NewClient(
 		modelDimensionTags:  NewSetFromStrings(modelDimensionTags),
 		modelMetadataTags:   NewSetFromStrings(modelMetadataTags),
 		modelsPerBatch:      modelsPerBatch,
+		packetsSemaphore:    packetsSemaphore,
 		tweaks:              NewSetFromStrings(tweaks),
 		disabledSubtypes:    disabledSubtypes,
 	}, nil
@@ -187,6 +199,10 @@ func (c *Client) SendEvent(ctx context.Context, e *gostatsd.Event) (retErr error
 func (c *Client) SendMetricsAsync(ctx context.Context, metrics *gostatsd.MetricMap, cb gostatsd.SendCallback) {
 	timestamp := time.Now().UnixNano() / 1e6
 	modeler := NewModeler()
+	counter := 0
+	results := make(chan []error)
+
+	ctx = metadata.AppendToOutgoingContext(ctx, "zenoss-api-key", c.apiKey)
 
 	zlogWithFields(log.Fields{
 		"counters": len(metrics.Counters),
@@ -203,23 +219,53 @@ func (c *Client) SendMetricsAsync(ctx context.Context, metrics *gostatsd.MetricM
 
 	models := modeler.GetModels()
 
-	go func() {
-		var errs = []error{}
-		defer cb(errs)
-
-		ctx = metadata.AppendToOutgoingContext(ctx, "zenoss-api-key", c.apiKey)
-
-		if len(models) > 0 {
-			errs = append(errs, c.putModels(ctx, models)...)
-		}
-
-		if len(zmetrics) > 0 {
-			if c.tweaks.Has(tweakUsePutMetric) {
-				errs = append(errs, c.putMetricStream(ctx, zmetrics)...)
-			} else {
-				errs = append(errs, c.putMetrics(ctx, zmetrics)...)
+	if len(models) > 0 {
+		if c.tweaks.Has(tweakNoModels) {
+			zlogRPC("PutModels").Debugf("skipping models due to %s tweak", tweakNoModels)
+		} else {
+			for _, batch := range c.getPutModelsBatches(models) {
+				zlogRPCWithField("PutModels", "count", len(batch.Models)).Debug("sending model batch")
+				counter++
+				go func() {
+					c.packetsSemaphore <- struct{}{}
+					defer func() { <-c.packetsSemaphore }()
+					err := c.putModels(ctx, batch)
+					results <- err
+				}()
 			}
 		}
+	}
+
+	if len(zmetrics) > 0 {
+		if c.tweaks.Has(tweakUsePutMetric) {
+			counter++
+			go func() {
+				c.packetsSemaphore <- struct{}{}
+				defer func() { <-c.packetsSemaphore }()
+				err := c.putMetricStream(ctx, zmetrics)
+				results <- err
+			}()
+		} else {
+			for _, batch := range c.getPutMetricsBatches(zmetrics) {
+				zlogRPCWithField("PutMetrics", "count", len(batch.Metrics)).Debug("sending metric batch")
+				counter++
+				go func() {
+					c.packetsSemaphore <- struct{}{}
+					defer func() { <-c.packetsSemaphore }()
+					err := c.putMetrics(ctx, batch)
+					results <- err
+				}()
+			}
+		}
+	}
+
+	go func() {
+		errs := make([]error, 0, counter)
+		for c := 0; c < counter; c++ {
+			err := <-results
+			errs = append(errs, err...)
+		}
+		cb(errs)
 	}()
 }
 
@@ -303,31 +349,21 @@ func (c *Client) appendMetric(metrics []*proto.Metric, value float64, timestamp 
 	)
 }
 
-func (c *Client) putModels(ctx context.Context, models []*proto.Model) []error {
+func (c *Client) putModels(ctx context.Context, models *data_receiver.Models) []error {
 	const rpc = "PutModels"
-	errs := []error{}
+	var errs = []error{}
 
-	if c.tweaks.Has(tweakNoModels) {
-		zlogRPC(rpc).Debugf("skipping models due to %s tweak", tweakNoModels)
-		return errs
+	putStatus, err := c.client.PutModels(ctx, models)
+	if err != nil {
+		zlogRPCWithError(rpc, err).Error("error sending model batch")
+		errs = append(errs, err)
+	} else {
+		zlogRPCWithFields(rpc, log.Fields{
+			"message":   putStatus.GetMessage(),
+			"succeeded": putStatus.GetSucceeded(),
+			"failed":    putStatus.GetFailed(),
+		}).Debug("sent model batch")
 	}
-
-	for _, b := range c.getPutModelsBatches(models) {
-		zlogRPCWithField(rpc, "count", len(b.Models)).Debug("sending model batch")
-
-		putStatus, err := c.client.PutModels(ctx, b)
-		if err != nil {
-			zlogRPCWithError(rpc, err).Error("error sending model batch")
-			errs = append(errs, err)
-		} else {
-			zlogRPCWithFields(rpc, log.Fields{
-				"message":   putStatus.GetMessage(),
-				"succeeded": putStatus.GetSucceeded(),
-				"failed":    putStatus.GetFailed(),
-			}).Debug("sent model batch")
-		}
-	}
-
 	return errs
 }
 
@@ -354,24 +390,19 @@ func (c *Client) getPutModelsBatches(inModels []*proto.Model) []*proto.Models {
 	return batches
 }
 
-func (c *Client) putMetrics(ctx context.Context, metrics []*proto.Metric) []error {
+func (c *Client) putMetrics(ctx context.Context, metrics *data_receiver.Metrics) []error {
 	const rpc = "PutMetrics"
 	errs := []error{}
-
-	for _, b := range c.getPutMetricsBatches(metrics) {
-		zlogRPCWithField(rpc, "count", len(b.Metrics)).Debug("sending metric batch")
-
-		putStatus, err := c.client.PutMetrics(ctx, b)
-		if err != nil {
-			zlogRPCWithError(rpc, err).Error("error sending metric batch")
-			errs = append(errs, err)
-		} else {
-			zlogRPCWithFields(rpc, log.Fields{
-				"message":   putStatus.GetMessage(),
-				"succeeded": putStatus.GetSucceeded(),
-				"failed":    putStatus.GetFailed(),
-			}).Debug("sent metric batch")
-		}
+	putStatus, err := c.client.PutMetrics(ctx, metrics)
+	if err != nil {
+		zlogRPCWithError(rpc, err).Error("error sending metric batch")
+		errs = append(errs, err)
+	} else {
+		zlogRPCWithFields(rpc, log.Fields{
+			"message":   putStatus.GetMessage(),
+			"succeeded": putStatus.GetSucceeded(),
+			"failed":    putStatus.GetFailed(),
+		}).Debug("sent metric batch")
 	}
 
 	return errs
@@ -416,7 +447,7 @@ func (c *Client) getPutMetricsBatches(inMetrics []*proto.Metric) []*proto.Metric
 	return batches
 }
 
-func (c *Client) putMetricStream(ctx context.Context, metrics []*proto.Metric) []error {
+func (c *Client) putMetricStream(ctx context.Context, metrics []*data_receiver.Metric) []error {
 	const rpc = "PutMetric"
 	errs := []error{}
 
