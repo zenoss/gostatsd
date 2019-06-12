@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"math"
 	"runtime"
 	"strings"
 	"time"
@@ -17,7 +18,6 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 
-	"github.com/zenoss/zenoss-protobufs/go/cloud/data_receiver"
 	proto "github.com/zenoss/zenoss-protobufs/go/cloud/data_receiver"
 )
 
@@ -27,9 +27,11 @@ const (
 
 	defaultDisableTLS      = false
 	defaultInsecureTLS     = false
+	defaultMaxRetries      = 3
 	defaultMetricsPerBatch = 1000
 	defaultModelInterval   = 1 * time.Minute
 	defaultModelsPerBatch  = 100
+	defaultRequestDelay    = 2.0
 
 	// gostatsd parameters.
 	paramDisabledSubMetrics = "disabled-sub-metrics"
@@ -39,12 +41,14 @@ const (
 	paramDisableTLS          = "disable-tls"
 	paramInsecureTLS         = "insecure-tls"
 	paramAPIKey              = "api-key"
+	paramMaxRetries          = "max-retries"
 	paramMetricsPerBatch     = "metrics-per-batch"
 	paramMetricDimensionTags = "metric-dimension-tags"
 	paramMetricMetadataTags  = "metric-metadata-tags"
 	paramModelDimensionTags  = "model-dimension-tags"
 	paramModelMetadataTags   = "model-metadata-tags"
 	paramModelsPerBatch      = "models-per-batch"
+	paramRequestDelay        = "request-delay"
 	paramTweaks              = "tweaks"
 
 	// zenoss tweaks for non-standard and testing behavior.
@@ -66,6 +70,7 @@ type Client struct {
 
 	// zenoss options
 	apiKey              string
+	maxRetries          int
 	metricsPerBatch     int
 	metricDimensionTags *Set
 	metricMetadataTags  *Set
@@ -73,6 +78,7 @@ type Client struct {
 	modelMetadataTags   *Set
 	modelsPerBatch      int
 	packetsSemaphore    chan struct{}
+	requestDelay        float64
 	tweaks              *Set
 
 	// gostatsd options
@@ -89,12 +95,14 @@ func NewClientFromViper(v *viper.Viper) (gostatsd.Backend, error) {
 
 	z.SetDefault(paramDisableTLS, defaultDisableTLS)
 	z.SetDefault(paramInsecureTLS, defaultInsecureTLS)
+	z.SetDefault(paramMaxRetries, defaultMaxRetries)
 	z.SetDefault(paramMetricsPerBatch, defaultMetricsPerBatch)
 	z.SetDefault(paramMetricDimensionTags, []string{})
 	z.SetDefault(paramMetricMetadataTags, []string{})
 	z.SetDefault(paramModelDimensionTags, []string{})
 	z.SetDefault(paramModelMetadataTags, []string{})
 	z.SetDefault(paramModelsPerBatch, defaultModelsPerBatch)
+	z.SetDefault(paramRequestDelay, defaultRequestDelay)
 	z.SetDefault(paramTweaks, []string{})
 	z.SetDefault("maxRequests", defaultmaxRequests)
 
@@ -103,14 +111,16 @@ func NewClientFromViper(v *viper.Viper) (gostatsd.Backend, error) {
 		z.GetString(paramAPIKey),
 		z.GetBool(paramDisableTLS),
 		z.GetBool(paramInsecureTLS),
+		uint(z.GetInt("maxRequests")),
+		z.GetInt(paramMaxRetries),
 		z.GetInt(paramMetricsPerBatch),
 		z.GetStringSlice(paramMetricDimensionTags),
 		z.GetStringSlice(paramMetricMetadataTags),
 		z.GetStringSlice(paramModelDimensionTags),
 		z.GetStringSlice(paramModelMetadataTags),
 		z.GetInt(paramModelsPerBatch),
+		z.GetFloat64(paramRequestDelay),
 		z.GetStringSlice(paramTweaks),
-		uint(z.GetInt("maxRequests")),
 		gostatsd.DisabledSubMetrics(v),
 	)
 }
@@ -121,26 +131,30 @@ func NewClient(
 	apiKey string,
 	disableTLS bool,
 	insecureTLS bool,
+	maxRequests uint,
+	maxRetries int,
 	metricsPerBatch int,
 	metricDimensionTags []string,
 	metricMetadataTags []string,
 	modelDimensionTags []string,
 	modelMetadataTags []string,
 	modelsPerBatch int,
+	requestDelay float64,
 	tweaks []string,
-	maxRequests uint,
 	disabledSubtypes gostatsd.TimerSubtypes) (*Client, error) {
 
 	zlogWithFields(log.Fields{
 		paramAddress:             address,
 		paramDisableTLS:          disableTLS,
 		paramInsecureTLS:         insecureTLS,
+		paramMaxRetries:          maxRetries,
 		paramMetricsPerBatch:     metricsPerBatch,
 		paramMetricDimensionTags: metricDimensionTags,
 		paramMetricMetadataTags:  metricMetadataTags,
 		paramModelDimensionTags:  modelDimensionTags,
 		paramModelMetadataTags:   modelMetadataTags,
 		paramModelsPerBatch:      modelsPerBatch,
+		paramRequestDelay:        requestDelay,
 		paramTweaks:              tweaks,
 		paramDisabledSubMetrics:  disabledSubtypes,
 	}).Info("creating client")
@@ -177,6 +191,7 @@ func NewClient(
 	return &Client{
 		client:              proto.NewDataReceiverServiceClient(conn),
 		apiKey:              apiKey,
+		maxRetries:          maxRetries,
 		metricsPerBatch:     metricsPerBatch,
 		metricDimensionTags: NewSetFromStrings(metricDimensionTags),
 		metricMetadataTags:  NewSetFromStrings(metricMetadataTags),
@@ -184,6 +199,7 @@ func NewClient(
 		modelMetadataTags:   NewSetFromStrings(modelMetadataTags),
 		modelsPerBatch:      modelsPerBatch,
 		packetsSemaphore:    packetsSemaphore,
+		requestDelay:        requestDelay,
 		tweaks:              NewSetFromStrings(tweaks),
 		disabledSubtypes:    disabledSubtypes,
 	}, nil
@@ -226,12 +242,7 @@ func (c *Client) SendMetricsAsync(ctx context.Context, metrics *gostatsd.MetricM
 			for _, batch := range c.getPutModelsBatches(models) {
 				zlogRPCWithField("PutModels", "count", len(batch.Models)).Debug("sending model batch")
 				counter++
-				go func() {
-					c.packetsSemaphore <- struct{}{}
-					defer func() { <-c.packetsSemaphore }()
-					err := c.putModels(ctx, batch)
-					results <- err
-				}()
+				c.post(func() []error { return c.putModels(ctx, batch) }, results)
 			}
 		}
 	}
@@ -239,22 +250,12 @@ func (c *Client) SendMetricsAsync(ctx context.Context, metrics *gostatsd.MetricM
 	if len(zmetrics) > 0 {
 		if c.tweaks.Has(tweakUsePutMetric) {
 			counter++
-			go func() {
-				c.packetsSemaphore <- struct{}{}
-				defer func() { <-c.packetsSemaphore }()
-				err := c.putMetricStream(ctx, zmetrics)
-				results <- err
-			}()
+			c.post(func() []error { return c.putMetricStream(ctx, zmetrics) }, results)
 		} else {
 			for _, batch := range c.getPutMetricsBatches(zmetrics) {
 				zlogRPCWithField("PutMetrics", "count", len(batch.Metrics)).Debug("sending metric batch")
 				counter++
-				go func() {
-					c.packetsSemaphore <- struct{}{}
-					defer func() { <-c.packetsSemaphore }()
-					err := c.putMetrics(ctx, batch)
-					results <- err
-				}()
+				c.post(func() []error { return c.putMetrics(ctx, batch) }, results)
 			}
 		}
 	}
@@ -267,6 +268,36 @@ func (c *Client) SendMetricsAsync(ctx context.Context, metrics *gostatsd.MetricM
 		}
 		cb(errs)
 	}()
+}
+
+func (c *Client) post(cb func() []error, results chan []error) {
+	go func() {
+		c.packetsSemaphore <- struct{}{}
+		defer func() { <-c.packetsSemaphore }()
+		err := c.processRequest(cb)
+		results <- err
+	}()
+}
+
+func (c *Client) processRequest(cb func() []error) []error {
+	attempts := 0
+	for {
+		var err = cb()
+
+		if len(err) > 0 {
+			fmt.Println("Fail to send data, retrying")
+			attempts++
+		} else {
+			return err
+		}
+
+		if attempts >= c.maxRetries {
+			fmt.Println("Fail to deliver data, dropping package")
+			return err
+		}
+		waitTime := time.Duration(math.Pow(c.requestDelay, float64(attempts))) * time.Second
+		time.Sleep(waitTime)
+	}
 }
 
 func (c *Client) processMetrics(timestamp int64, metrics *gostatsd.MetricMap, modeler *Modeler) []*proto.Metric {
@@ -349,7 +380,7 @@ func (c *Client) appendMetric(metrics []*proto.Metric, value float64, timestamp 
 	)
 }
 
-func (c *Client) putModels(ctx context.Context, models *data_receiver.Models) []error {
+func (c *Client) putModels(ctx context.Context, models *proto.Models) []error {
 	const rpc = "PutModels"
 	var errs = []error{}
 
@@ -390,7 +421,7 @@ func (c *Client) getPutModelsBatches(inModels []*proto.Model) []*proto.Models {
 	return batches
 }
 
-func (c *Client) putMetrics(ctx context.Context, metrics *data_receiver.Metrics) []error {
+func (c *Client) putMetrics(ctx context.Context, metrics *proto.Metrics) []error {
 	const rpc = "PutMetrics"
 	errs := []error{}
 	putStatus, err := c.client.PutMetrics(ctx, metrics)
@@ -447,7 +478,7 @@ func (c *Client) getPutMetricsBatches(inMetrics []*proto.Metric) []*proto.Metric
 	return batches
 }
 
-func (c *Client) putMetricStream(ctx context.Context, metrics []*data_receiver.Metric) []error {
+func (c *Client) putMetricStream(ctx context.Context, metrics []*proto.Metric) []error {
 	const rpc = "PutMetric"
 	errs := []error{}
 
