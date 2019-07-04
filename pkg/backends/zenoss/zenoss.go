@@ -41,7 +41,7 @@ const (
 	paramDisableTLS          = "disable-tls"
 	paramInsecureTLS         = "insecure-tls"
 	paramAPIKey              = "api-key"
-	paramMaxRequests         = "max_requests"
+	paramMaxRequests         = "max-requests"
 	paramMaxRetries          = "max-retries"
 	paramMetricsPerBatch     = "metrics-per-batch"
 	paramMetricDimensionTags = "metric-dimension-tags"
