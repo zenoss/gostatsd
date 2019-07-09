@@ -30,7 +30,6 @@ const (
 	defaultMaxRetries      = 3
 	defaultMetricsPerBatch = 1000
 	defaultModelInterval   = 1 * time.Minute
-	defaultModelsPerBatch  = 100
 	defaultRequestDelay    = 2.0
 
 	// gostatsd parameters.
@@ -48,7 +47,6 @@ const (
 	paramMetricMetadataTags  = "metric-metadata-tags"
 	paramModelDimensionTags  = "model-dimension-tags"
 	paramModelMetadataTags   = "model-metadata-tags"
-	paramModelsPerBatch      = "models-per-batch"
 	paramRequestDelay        = "request-delay"
 	paramTweaks              = "tweaks"
 
@@ -78,7 +76,6 @@ type Client struct {
 	metricMetadataTags  *Set
 	modelDimensionTags  *Set
 	modelMetadataTags   *Set
-	modelsPerBatch      int
 	requestDelay        float64
 	tweaks              *Set
 
@@ -105,7 +102,6 @@ func NewClientFromViper(v *viper.Viper) (gostatsd.Backend, error) {
 	z.SetDefault(paramMetricMetadataTags, []string{})
 	z.SetDefault(paramModelDimensionTags, []string{})
 	z.SetDefault(paramModelMetadataTags, []string{})
-	z.SetDefault(paramModelsPerBatch, defaultModelsPerBatch)
 	z.SetDefault(paramRequestDelay, defaultRequestDelay)
 	z.SetDefault(paramTweaks, []string{})
 
@@ -121,7 +117,6 @@ func NewClientFromViper(v *viper.Viper) (gostatsd.Backend, error) {
 		z.GetStringSlice(paramMetricMetadataTags),
 		z.GetStringSlice(paramModelDimensionTags),
 		z.GetStringSlice(paramModelMetadataTags),
-		z.GetInt(paramModelsPerBatch),
 		z.GetFloat64(paramRequestDelay),
 		z.GetStringSlice(paramTweaks),
 		v.GetDuration("flush-interval"), // Main viper, not sub-viper
@@ -142,7 +137,6 @@ func NewClient(
 	metricMetadataTags []string,
 	modelDimensionTags []string,
 	modelMetadataTags []string,
-	modelsPerBatch int,
 	requestDelay float64,
 	tweaks []string,
 	flushInterval time.Duration,
@@ -157,16 +151,12 @@ func NewClient(
 		paramMetricMetadataTags:  metricMetadataTags,
 		paramModelDimensionTags:  modelDimensionTags,
 		paramModelMetadataTags:   modelMetadataTags,
-		paramModelsPerBatch:      modelsPerBatch,
 		paramTweaks:              tweaks,
 		paramDisabledSubMetrics:  disabledSubtypes,
 	}).Info("creating client")
 
 	if metricsPerBatch <= 0 {
 		return nil, fmt.Errorf("[%s] %s must be positive", BackendName, paramMetricsPerBatch)
-	}
-	if modelsPerBatch <= 0 {
-		return nil, fmt.Errorf("[%s] %s must be positive", BackendName, paramModelsPerBatch)
 	}
 	if address == "" {
 		return nil, fmt.Errorf("[%s] %s must be specified", BackendName, paramAddress)
@@ -203,7 +193,6 @@ func NewClient(
 		metricMetadataTags:  NewSetFromStrings(metricMetadataTags),
 		modelDimensionTags:  NewSetFromStrings(modelDimensionTags),
 		modelMetadataTags:   NewSetFromStrings(modelMetadataTags),
-		modelsPerBatch:      modelsPerBatch,
 		requestDelay:        requestDelay,
 		tweaks:              NewSetFromStrings(tweaks),
 		now:                 time.Now,
@@ -293,12 +282,9 @@ func (c *Client) postData(ctx context.Context, ts *timeSeries) []error {
 func (c *Client) processRequest(cb func() error) error {
 	attempts := 0
 	for {
-		var err = cb()
+		err := cb()
 
-		if err != nil {
-			zlog().Warn("Fail to send data, retrying")
-			attempts++
-		} else {
+		if err == nil {
 			return err
 		}
 
@@ -307,6 +293,9 @@ func (c *Client) processRequest(cb func() error) error {
 			zlogWithError(err)
 			return err
 		}
+
+		zlog().Warn("Fail to send data, retrying")
+		attempts++
 		waitTime := time.Duration(math.Pow(c.requestDelay, float64(attempts))) * time.Second
 		time.Sleep(waitTime)
 	}
