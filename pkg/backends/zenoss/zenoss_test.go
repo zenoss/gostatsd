@@ -27,7 +27,7 @@ type connectionMock struct {
 }
 
 // make request and check it for errors
-func makeRequest(t *testing.T, c Client, cb func() *gostatsd.MetricMap) {
+func makeRequest(t *testing.T, c *Client, cb func() *gostatsd.MetricMap) {
 	res := make(chan []error, 1)
 	c.SendMetricsAsync(context.Background(), cb(), func(errs []error) {
 		res <- errs
@@ -40,70 +40,70 @@ func makeRequest(t *testing.T, c Client, cb func() *gostatsd.MetricMap) {
 
 func TestMetricsRetries(t *testing.T) {
 	requestsWithError := 3
-	client := newTestClient(requestsWithError, defaultMetricsPerBatch)
-	makeRequest(t, client, func() *gostatsd.MetricMap { return twoCounters() })
+	client, conn := newTestClient(requestsWithError, defaultMetricsPerBatch)
+	makeRequest(t, 	&client, func() *gostatsd.MetricMap { return twoCounters() })
 
 	expectedRequests := 4
-	assert.Equal(t, expectedRequests, client.client.(*connectionMock).putMetricsRequests)
+	assert.Equal(t, expectedRequests, conn.putMetricsRequests)
 }
 
 func TestModelsRetries(t *testing.T) {
 	requestsWithError := 3
-	client := newTestClient(requestsWithError, defaultMetricsPerBatch)
-	makeRequest(t, client, func() *gostatsd.MetricMap { return twoCounters() })
+	client, conn := newTestClient(requestsWithError, defaultMetricsPerBatch)
+	makeRequest(t, &client, func() *gostatsd.MetricMap { return twoCounters() })
 
 	expectedRequests := 4
-	assert.Equal(t, expectedRequests, client.client.(*connectionMock).putModelsRequests)
+	assert.Equal(t, expectedRequests, conn.putModelsRequests)
 }
 
 func TestMetricsSendFailed(t *testing.T) {
 	requestsWithError := 4
-	client := newTestClient(requestsWithError, defaultMetricsPerBatch)
+	client, conn := newTestClient(requestsWithError, defaultMetricsPerBatch)
 	res := make(chan []error, 1)
 	client.SendMetricsAsync(context.Background(), twoCounters(), func(errs []error) {
 		res <- errs
 	})
 	<-res
 	expectedRequests := 4
-	assert.Equal(t, expectedRequests, client.client.(*connectionMock).putMetricsRequests)
+	assert.Equal(t, expectedRequests, conn.putMetricsRequests)
 }
 
 func TestModelsSendFailed(t *testing.T) {
 	requestsWithError := 4
-	client := newTestClient(requestsWithError, defaultMetricsPerBatch)
+	client, conn := newTestClient(requestsWithError, defaultMetricsPerBatch)
 	res := make(chan []error, 1)
 	client.SendMetricsAsync(context.Background(), twoCounters(), func(errs []error) {
 		res <- errs
 	})
 	<-res
 	expectedRequests := 4
-	assert.Equal(t, expectedRequests, client.client.(*connectionMock).putModelsRequests)
+	assert.Equal(t, expectedRequests, conn.putModelsRequests)
 }
 
 func TestSendMetricsInMultipleBatches(t *testing.T) {
 	requestsWithError := 0
 	metricsPerBatch := 1
-	client := newTestClient(requestsWithError, metricsPerBatch)
-	makeRequest(t, client, func() *gostatsd.MetricMap { return twoCounters() })
+	client, conn := newTestClient(requestsWithError, metricsPerBatch)
+	makeRequest(t, &client, func() *gostatsd.MetricMap { return twoCounters() })
 
 	expectedRequests := 2
-	assert.Equal(t, expectedRequests, client.client.(*connectionMock).putMetricsRequests)
+	assert.Equal(t, expectedRequests, conn.putMetricsRequests)
 }
 
 func TestSendModelsInMultipleBatches(t *testing.T) {
 	requestsWithError := 0
 	metricsPerBatch := 1
-	client := newTestClient(requestsWithError, metricsPerBatch)
-	makeRequest(t, client, func() *gostatsd.MetricMap { return twoCounters() })
+	client, conn := newTestClient(requestsWithError, metricsPerBatch)
+	makeRequest(t, &client, func() *gostatsd.MetricMap { return twoCounters() })
 
 	expectedRequests := 2
-	assert.Equal(t, expectedRequests, client.client.(*connectionMock).putModelsRequests)
+	assert.Equal(t, expectedRequests, conn.putModelsRequests)
 }
 
 func TestSendMetrics(t *testing.T) {
 	requestsWithError := 0
-	client := newTestClient(requestsWithError, defaultMetricsPerBatch)
-	makeRequest(t, client, func() *gostatsd.MetricMap { return metricsOneOfEach() })
+	client, conn := newTestClient(requestsWithError, defaultMetricsPerBatch)
+	makeRequest(t, &client, func() *gostatsd.MetricMap { return metricsOneOfEach() })
 
 	expected := "c1.rate 1.1\n" +
 		"c1.count 5.0\n" +
@@ -120,7 +120,7 @@ func TestSendMetrics(t *testing.T) {
 		"g1 3.0\n" +
 		"users 3.0\n"
 
-	result := client.client.(*connectionMock).metricsBody
+	result := conn.metricsBody
 	str_result := ""
 	for _, metric := range result.GetMetrics() {
 		str_result += metric.GetMetric() + fmt.Sprintf(" %.1f\n", metric.GetValue())
@@ -130,40 +130,40 @@ func TestSendMetrics(t *testing.T) {
 
 func TestSendMetricsDimensionTags(t *testing.T) {
 	requestsWithError := 0
-	client := newTestClient(requestsWithError, defaultMetricsPerBatch)
-	makeRequest(t, client, func() *gostatsd.MetricMap { return oneCounter() })
+	client, conn := newTestClient(requestsWithError, defaultMetricsPerBatch)
+	makeRequest(t, &client, func() *gostatsd.MetricMap { return oneCounter() })
 
-	result := client.client.(*connectionMock).metricsBody.GetMetrics()[0].GetDimensions()
+	result := conn.metricsBody.GetMetrics()[0].GetDimensions()
 	assert.Equal(t, "com.zenoss", result["source"])
 	assert.Equal(t, "com.zenoss.app-examples", result["contextUUID"])
 }
 
 func TestSendModelsDimensionTags(t *testing.T) {
 	requestsWithError := 0
-	client := newTestClient(requestsWithError, defaultMetricsPerBatch)
-	makeRequest(t, client, func() *gostatsd.MetricMap { return oneCounter() })
+	client, conn := newTestClient(requestsWithError, defaultMetricsPerBatch)
+	makeRequest(t, &client, func() *gostatsd.MetricMap { return oneCounter() })
 
-	result := client.client.(*connectionMock).modelsBody.GetModels()[0].GetDimensions()
+	result := conn.modelsBody.GetModels()[0].GetDimensions()
 	assert.Equal(t, "com.zenoss", result["source"])
 	assert.Equal(t, "com.zenoss.app-examples", result["contextUUID"])
 }
 
 func TestSendMetricsMetadataTags(t *testing.T) {
 	requestsWithError := 0
-	client := newTestClient(requestsWithError, defaultMetricsPerBatch)
-	makeRequest(t, client, func() *gostatsd.MetricMap { return oneCounter() })
+	client, conn := newTestClient(requestsWithError, defaultMetricsPerBatch)
+	makeRequest(t, &client, func() *gostatsd.MetricMap { return oneCounter() })
 
-	result := client.client.(*connectionMock).metricsBody.GetMetrics()[0].GetMetadataFields().GetFields()
+	result := conn.metricsBody.GetMetrics()[0].GetMetadataFields().GetFields()
 	assert.Equal(t, "com.atlassian.gostatsd", result["source-type"].GetKind().(*_struct.Value_StringValue).StringValue)
 	assert.Equal(t, "gostatsd.app-examples", result["name"].GetKind().(*_struct.Value_StringValue).StringValue)
 }
 
 func TestSendModelsMetadataTags(t *testing.T) {
 	requestsWithError := 0
-	client := newTestClient(requestsWithError, defaultMetricsPerBatch)
-	makeRequest(t, client, func() *gostatsd.MetricMap { return oneCounter() })
+	client, conn := newTestClient(requestsWithError, defaultMetricsPerBatch)
+	makeRequest(t, &client, func() *gostatsd.MetricMap { return oneCounter() })
 
-	result := client.client.(*connectionMock).modelsBody.GetModels()[0].GetMetadataFields().GetFields()
+	result := conn.modelsBody.GetModels()[0].GetMetadataFields().GetFields()
 	assert.Equal(t, "com.atlassian.gostatsd", result["source-type"].GetKind().(*_struct.Value_StringValue).StringValue)
 	assert.Equal(t, "gostatsd.app-examples", result["name"].GetKind().(*_struct.Value_StringValue).StringValue)
 }
@@ -194,7 +194,7 @@ func (c *connectionMock) PutMetric(_ context.Context, _ ...grpc.CallOption) (pro
 	return nil, nil
 }
 
-func newTestClient(requestsWithError int, metricsPerBatch int) Client {
+func newTestClient(requestsWithError int, metricsPerBatch int) (Client, *connectionMock) {
 	metricsSem := make(chan struct{}, defaultMaxRequests)
 	for i := uint(0); i < defaultMaxRequests; i++ {
 		metricsSem <- struct{}{}
@@ -207,7 +207,7 @@ func newTestClient(requestsWithError int, metricsPerBatch int) Client {
 		putModelsRequests:  0,
 	}
 
-	return Client{
+	c := Client{
 		client:              conn,
 		apiKey:              "apiKey123",
 		maxRetries:          defaultMaxRetries,
@@ -223,6 +223,8 @@ func newTestClient(requestsWithError int, metricsPerBatch int) Client {
 		flushInterval:       1 * time.Second,
 		disabledSubtypes:    gostatsd.TimerSubtypes{},
 	}
+
+	return c, c.client.(*connectionMock)
 }
 
 func oneCounter() *gostatsd.MetricMap {
