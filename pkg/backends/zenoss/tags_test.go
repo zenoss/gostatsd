@@ -71,7 +71,7 @@ func TestParseTag(t *testing.T) {
 
 func TestValueFromString(t *testing.T) {
 
-	t.Run("cheking not empty", func(t *testing.T) {
+	t.Run("checking not empty", func(t *testing.T) {
 		pointer := valueFromString("test_input")
 		assert.NotEmpty(t, pointer)
 	})
@@ -96,7 +96,7 @@ func TestValueFromString(t *testing.T) {
 
 func TestValueFromStringSlice(t *testing.T) {
 
-	t.Run("cheking not empty", func(t *testing.T) {
+	t.Run("checking not empty", func(t *testing.T) {
 		pointer := valueFromStringSlice([]string{"a", "b", "c"})
 		assert.NotEmpty(t, pointer)
 	})
